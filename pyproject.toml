@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "team-ads-mcp"
+version = "0.1.0"
+description = "Independent local Google Ads MCP with reviewed change plans"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "google-ads==33.0.0",
+  "google-auth-oauthlib==1.5.0",
+  "mcp==2.3.0",
+  "pydantic>=2.12,<3",
+  "keyring>=25,<26",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.14,<1"]
+
+[project.scripts]
+team-ads = "team_ads_mcp.cli:main"
+team-ads-mcp = "team_ads_mcp.server:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Provider and protocol boundaries intentionally catch and redact arbitrary exceptions.
+ignore = ["BLE001"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/team_ads_mcp"]

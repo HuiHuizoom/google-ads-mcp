@@ -1,0 +1,25 @@
+{
+  "account": {"customer_id": "1234567890", "login_customer_id": "9876543210"},
+  "request_key": "example-search-plan-001",
+  "change": {
+    "kind": "create_search",
+    "name": "Example Search",
+    "currency": "USD",
+    "daily_amount": "25.00",
+    "bidding": "MANUAL_CPC",
+    "geo_target_ids": ["2840"],
+    "language_ids": ["1000"],
+    "eu_political_advertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+    "ad_groups": [
+      {
+        "name": "Product Intent",
+        "cpc_bid": "1.20",
+        "final_url": "https://example.com",
+        "headlines": ["Example Product", "Explore Features", "Try Our Service"],
+        "descriptions": ["Find the right product for your team.", "Compare features and get started today."],
+        "keywords": [{"text": "team product", "match_type": "EXACT"}]
+      }
+    ],
+    "negative_keywords": [{"text": "free", "match_type": "PHRASE"}]
+  }
+}

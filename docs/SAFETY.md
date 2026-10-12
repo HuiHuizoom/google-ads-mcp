@@ -1,0 +1,47 @@
+# 写入边界与恢复
+
+## 信任与审批
+
+MCP 客户端可提出计划、读取计划、提交已审批计划；它不能通过一个布尔参数获得批准。审批 CLI 调用独立 macOS 原生窗口，展示账户、输入、before、实际 operations、警告、到期时间和 plan hash，并要求系统用户身份验证。此后仅同一完整计划的 hash 可提交，默认 15 分钟到期。
+
+OS Keychain、代码和本机私有状态目录属于同一个可信 OS 用户。此设计防止 MCP 工具参数自我批准，**不防御拥有同一 OS 用户任意代码/文件权限的恶意进程**；那类进程可以直接改代码或账本。若要向不可信代理开放 shell/文件权限，应先拆分执行身份、凭据和审批服务。当前不提供 HTTP 监听，不将 MCP 客户端登录与 Google OAuth 混为一谈。
+
+## 提交状态机
+
+`VALIDATED → APPROVED → IN_FLIGHT → VERIFIED`
+
+- VALIDATED：本地约束、官方 SDK 结构和 Google validate_only 均已通过（离线测试会明确标注模拟来源）。
+- APPROVED：独立审批绑定计划内容、账户路由、权限配置及授权 epoch。
+- IN_FLIGHT：账本已持久化，账户锁已取得，可能已经发送。进程崩溃后先 reconcile。
+- VERIFIED：Google 回执和完整回读通过，且当前结构与计划一致；不证明政策审核、曝光、转化。
+- STALE：发送写入之前发现状态变化、过期或权限/校验失败，需要新计划和新审批。
+- REJECTED：Google 对写请求给出确定性拒绝。不会自动重试。
+- UNKNOWN：网络、内部错误、部分失败异常或回读异常使结果不明，保留账户锁。
+- READBACK_MISMATCH：有回执，但结构/内容未完全匹配，保留账户锁。
+- RECONCILED：只读核对发现预期完整状态，可以解除本地锁；不宣称绝对因果归属或 exactly-once。
+
+同一 request_key 对不同输入返回冲突；同一 operation_id 不重复发送。SQLite 事务保护计划 claim，进程锁防止仍在发送时误做恢复。UNKNOWN 阻止该账户其他写入（包括经另一 MCC 路径的同一 advertiser）；可以继续读取。
+
+## Google 边界
+
+每个计划一次 `GoogleAdsService.Mutate`，`partial_failure=false`，关闭 SDK 自动重试。创建使用唯一负临时 ID，依赖对象排在引用者之前。新 Campaign、AdGroup、RSA 固定 PAUSED；新关键词可以 ENABLED，但父级都暂停。
+
+预算使用 Decimal 转正整数 micros；需要显式匹配账户币种。更新预算必须列全 Campaign，预算 reference_count 与可见引用数也必须一致；共享影响写进预览。提交前重读原始状态与影响集合，并再次 validate_only。
+
+Google Ads 没有在这里可用的远端 compare-and-swap：最后一次读取和 mutate 之间，其他用户/工具仍可能并发修改。账户锁只协调本项目实例。回读不匹配会保留锁并提示核对；不能宣称消除了所有并发风险。避免同时用 Ads UI 或其他程序修改相同资源。
+
+请求返回后先保存回执，再完整回读。创建以不可变计划 ID 追加到资源名称的标记定位；检查预算、Campaign 配置、地域/语言、各广告组、关键词/否定词、文案和网址。缺一项都不记为 VERIFIED。标记可能被外部人工改名导致恢复无法匹配，需人工核对。
+
+UNKNOWN 下“暂时查不到”不能证明没有创建，系统保持锁定，禁止自动重发或自动清账。若多次核对仍无法确定，使用 Google Ads 更改历史/支持渠道核对，再由维护者设计具体恢复；此版本故意没有通用 force-unlock 或重发按钮。重新登录后可以只读核对旧计划，旧批准不能用于新写入。
+
+## 数据与安全输出
+
+只读搜索设置行数限制，超过上限报错而不是提供假完整结果。预定义报表要求明确起止日期并按账户时区校验；原始 GAQL 的日期范围来自 query 本身。source、fetched_at、timezone、currency 和未知 data_through 随结果返回。关键词历史指标不等于当前流量或未来效果；转化设置不是实际回传证明。
+
+凭据不进入 MCP 输入输出、日志、SQLite 或 Git。异常只返回稳定错误码、Google request_id 和枚举错误码，避免转发可能含 headers/token 的原始异常。Google SDK 的原始请求日志在入口禁用。数据库含账户结构/文案等业务数据，属于本机私有数据，应跟随主机备份与访问策略管理。
+
+## 验证分层
+
+- 已验证：真实 MCP 协议、真实锁定 SDK 消息、持久化/竞争/去重、精确金额、账户路由隔离、共享预算、刷新失败、PKCE/state、计划变化、超时未知、回读失败及恢复。
+- 模拟验证：Google 读取、validate_only、mutate 和远端回读；OS 审批成功/取消边界通过依赖注入测试，不能当成真人身份认证证据。
+- 未验证：真实 Google OAuth 完整授权、Cloud 授予访问等级、真实 Ads 账户/API 预检、真实写入、原生窗口人工交互/身份认证、投放和转化效果。
