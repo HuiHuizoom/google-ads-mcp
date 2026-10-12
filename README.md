@@ -7,7 +7,7 @@
 ## 启动
 
 ```sh
-cd /Users/huitong/Documents/Codex/2026-10-12/google-ads-mcp
+cd /Users/huitong/Workspace/google-ads-mcp
 uv sync --frozen
 uv run team-ads doctor
 uv run team-ads serve

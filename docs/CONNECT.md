@@ -52,9 +52,9 @@ macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring
 {
   "mcpServers": {
     "team-ads": {
-      "command": "/Users/huitong/Documents/Codex/2026-10-12/google-ads-mcp/.venv/bin/team-ads-mcp",
+      "command": "/Users/huitong/Workspace/google-ads-mcp/.venv/bin/team-ads-mcp",
       "env": {
-        "TEAM_ADS_STATE_DIR": "/Users/huitong/Documents/Codex/2026-10-12/google-ads-mcp/.state"
+        "TEAM_ADS_STATE_DIR": "/Users/huitong/Workspace/google-ads-mcp/.state"
       }
     }
   }
