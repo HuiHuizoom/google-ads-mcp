@@ -38,6 +38,13 @@ def put_path(item, path, value):
     item["type_" if keys[-1] == "type" else keys[-1]] = deepcopy(value)
 
 
+def clear_path(item, path):
+    keys = path.split(".")
+    for key in keys[:-1]:
+        item = item.setdefault(key, {})
+    item.pop(keys[-1], None)
+
+
 class FakeProvider:
     source = "offline_test_simulator"
 
@@ -80,11 +87,15 @@ class FakeProvider:
                     "status": "PAUSED",
                     "campaign": CAMPAIGN,
                     "cpc_bid_micros": 1_000_000,
+                    "type_": "SEARCH_STANDARD",
                 }
             },
             "ad_group_ad": {},
             "ad_group_criterion": {},
             "campaign_criterion": {},
+            "asset": {},
+            "campaign_asset": {},
+            "ad_group_criterion_label": {},
         }
         self.calls = []
         self.sdk = GoogleAdsClient(
@@ -106,8 +117,10 @@ class FakeProvider:
         row = {resource: deepcopy(body)}
         if resource in {"ad_group_ad", "ad_group_criterion"}:
             row["ad_group"] = deepcopy(self.records["ad_group"][body["ad_group"]])
-        if resource == "campaign_criterion":
+        if resource in {"campaign_criterion", "campaign_asset"}:
             row["campaign"] = deepcopy(self.records["campaign"][body["campaign"]])
+        if resource == "campaign_asset":
+            row["asset"] = deepcopy(self.records["asset"][body["asset"]])
         if "ad_group" in row:
             row["campaign"] = deepcopy(self.records["campaign"][row["ad_group"]["campaign"]])
         if "campaign" in row:
@@ -154,6 +167,20 @@ class FakeProvider:
             validate_only=validate_only,
         )
         type(req).serialize(req)
+        # FieldMask strings are not validated by protobuf construction itself.
+        for entry in req.mutate_operations:
+            pb_entry = type(entry).pb(entry)
+            op = getattr(pb_entry, pb_entry.WhichOneof("operation"))
+            if op.WhichOneof("operation") == "update":
+                for path in op.update_mask.paths:
+                    descriptor = op.update.DESCRIPTOR
+                    for part in path.split("."):
+                        assert part in descriptor.fields_by_name, path
+                        field = descriptor.fields_by_name[part]
+                        descriptor = field.message_type
+                    assert field.message_type is None or field.is_repeated, (
+                        f"mask must address a leaf or repeated field: {path}"
+                    )
         self.calls.append((validate_only, deepcopy(operations)))
         if validate_only:
             if self.validation_failure:
@@ -169,6 +196,9 @@ class FakeProvider:
             "ad_group_ad": "adGroupAds",
             "ad_group_criterion": "adGroupCriteria",
             "campaign_criterion": "campaignCriteria",
+            "asset": "assets",
+            "campaign_asset": "campaignAssets",
+            "ad_group_criterion_label": "adGroupCriterionLabels",
         }
 
         def substitute(value):
@@ -192,18 +222,70 @@ class FakeProvider:
                 if "resource_name" in body:
                     mapping[body["resource_name"]] = name
                 body["resource_name"] = name
-                body.setdefault("status", "ENABLED")
+                if resource not in {"asset", "ad_group_criterion_label"}:
+                    body.setdefault("status", "ENABLED")
                 if resource == "campaign_budget":
                     body.update(period="DAILY", reference_count=1)
                 if resource == "campaign":
                     body["bidding_strategy_type"] = "MANUAL_CPC"
                 if resource.endswith("criterion") and "keyword" in body:
                     body["type_"] = "KEYWORD"
+                if resource == "campaign_criterion":
+                    for field, kind in [
+                        ("location", "LOCATION"),
+                        ("language", "LANGUAGE"),
+                        ("ad_schedule", "AD_SCHEDULE"),
+                        ("device", "DEVICE"),
+                    ]:
+                        if field in body:
+                            body["type_"] = kind
+                if resource == "ad_group_ad":
+                    body["ad"].update(
+                        resource_name=ROOT + "/ads/" + str(self.counter),
+                        type_="RESPONSIVE_SEARCH_AD",
+                    )
+                if resource in {"asset", "campaign_asset"}:
+                    body["source"] = "ADVERTISER"
+                if resource == "asset":
+                    body["type_"] = next(
+                        k.removesuffix("_asset").upper() for k in body if k.endswith("_asset")
+                    )
+                if resource == "ad_group_criterion_label":
+                    criterion = self.records["ad_group_criterion"][body["ad_group_criterion"]]
+                    criterion.setdefault("labels", []).append(body["label"])
                 self.records[resource][name] = body
             elif "update" in value:
                 body = value["update"]
                 name = body["resource_name"]
-                self.records[resource][name].update(body)
+                targets = (
+                    [
+                        r["ad"]
+                        for r in self.records["ad_group_ad"].values()
+                        if r["ad"]["resource_name"] == name
+                    ]
+                    if resource == "ad"
+                    else [self.records[resource][name]]
+                )
+                for target in targets:
+                    for path in value["update_mask"]["paths"]:
+                        updated = get_path(body, path)
+                        if updated is None:
+                            clear_path(target, path)
+                        else:
+                            put_path(target, path, updated)
+                    if resource == "campaign":
+                        strategies = {
+                            "manual_cpc": "MANUAL_CPC",
+                            "target_spend": "TARGET_SPEND",
+                            "maximize_conversions": "MAXIMIZE_CONVERSIONS",
+                            "maximize_conversion_value": "MAXIMIZE_CONVERSION_VALUE",
+                        }
+                        chosen = next((k for k in body if k in strategies), None)
+                        if chosen:
+                            target["bidding_strategy_type"] = strategies[chosen]
+                            target.setdefault(chosen, {})
+                            for other in strategies.keys() - {chosen}:
+                                target.pop(other, None)
             else:
                 name = value["remove"]
                 self.records[resource][name]["status"] = "REMOVED"

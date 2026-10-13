@@ -20,8 +20,12 @@ async def test_actual_stdio_initialize_list_and_unconfigured_call(tmp_path):
         init = await session.initialize()
         assert init.server_info.name == "team-ads-mcp"
         listed = await session.list_tools()
-        assert len(listed.tools) == 13
+        assert len(listed.tools) == 14
         assert not any("approve" == t.name for t in listed.tools)
+        preview_schema = next(t.input_schema for t in listed.tools if t.name == "preview_change")
+        kinds = preview_schema["properties"]["change"]["discriminator"]["mapping"]
+        assert len(kinds) == 20 and "update_ad" in kinds and "set_targeting" in kinds
+        assert "省略字段保留原值" in preview_schema["$defs"]["RSAPatch"]["description"]
         status = await session.call_tool("connection_status", {})
         assert not status.is_error
         assert status.structured_content["live_google_connection"] == "not_checked"
@@ -40,7 +44,7 @@ async def test_full_protocol_preview_approval_submit_readback(tmp_path):
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         await session.initialize()
         listed = await session.list_tools()
-        assert len(listed.tools) == 13
+        assert len(listed.tools) == 14
         preflight = await session.call_tool("preflight", {"account": ACCOUNT.model_dump()})
         assert preflight.structured_content["provenance"]["source"] == "offline_test_simulator"
         assert preflight.structured_content["provenance"]["account_time_zone"] == "America/New_York"
@@ -61,3 +65,55 @@ async def test_full_protocol_preview_approval_submit_readback(tmp_path):
         status = await session.call_tool("operation_status", {"operation_id": plan["id"]})
         assert status.structured_content["plan"]["status"] == "VERIFIED"
         assert any(e["event"] == "APPROVED" for e in status.structured_content["events"])
+        # Actual protocol lifecycle: discover a newly created ad, then edit it in a later plan.
+        ads = await session.call_tool(
+            "list_resources", {"account": ACCOUNT.model_dump(), "resource": "ads"}
+        )
+        assert not ads.is_error
+        ad = ads.structured_content["data"][0]["ad_group_ad"]
+        links = await session.call_tool(
+            "list_resources",
+            {
+                "account": ACCOUNT.model_dump(),
+                "resource": "ads",
+                "ad_resource": ad["ad"]["resource_name"],
+            },
+        )
+        change = {
+            "account": ACCOUNT.model_dump(),
+            "request_key": "edit-existing-ad-001",
+            "change": {
+                "kind": "update_ad",
+                "ad_group_ad": ad["resource_name"],
+                "expected_ad_group_ads": [
+                    r["ad_group_ad"]["resource_name"] for r in links.structured_content["data"]
+                ],
+                "patch": {"final_urls": ["https://example.com/updated"]},
+            },
+        }
+        edit = await session.call_tool("preview_change", change)
+        assert not edit.is_error, edit
+        plan = edit.structured_content
+        denied = await session.call_tool("submit_change", {"operation_id": plan["id"]})
+        assert denied.is_error
+        Ledger(tmp_path).approve(plan["id"], plan["plan_hash"], "test_human_presence")
+        edited = await session.call_tool("submit_change", {"operation_id": plan["id"]})
+        assert edited.structured_content["status"] == "VERIFIED", edited
+        current = await session.call_tool(
+            "list_resources", {"account": ACCOUNT.model_dump(), "resource": "ads"}
+        )
+        assert current.structured_content["data"][0]["ad_group_ad"]["ad"]["final_urls"] == [
+            "https://example.com/updated"
+        ]
+        isolated = await session.call_tool(
+            "list_resources",
+            {
+                "account": ACCOUNT.model_dump(),
+                "resource": "ads",
+                "campaign": "customers/9999999999/campaigns/11",
+            },
+        )
+        assert (
+            isolated.is_error
+            and isolated.structured_content["error"]["code"] == "CROSS_ACCOUNT_RESOURCE"
+        )

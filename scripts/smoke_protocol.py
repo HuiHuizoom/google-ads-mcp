@@ -24,7 +24,7 @@ async def main():
             denied = await session.call_tool(
                 "preflight", {"account": {"customer_id": "1234567890"}}
             )
-            assert len(listed.tools) == 13 and not status.is_error
+            assert len(listed.tools) == 14 and not status.is_error
             assert (
                 denied.is_error
                 and denied.structured_content["error"]["code"] == "ACCOUNT_NOT_ALLOWED"

@@ -27,6 +27,7 @@ uv run team-ads serve
 | `account_hierarchy` | MCC 层级、manager、status、币种/时区 |
 | `field_metadata` | GAQL 字段和兼容性查询 |
 | `run_gaql` | 只读、有行数上限的 GAQL |
+| `list_resources` | 读取可维护资源的当前设置、完整 ID；支持按系列、广告组和共享广告过滤 |
 | `performance_report` | 明确日期的 Campaign / 搜索词报表 |
 | `keyword_ideas` | 地域、语言、种子关键词研究 |
 | `preview_change` | before/after、SDK 校验、Google validate_only、持久化计划 |
@@ -34,7 +35,19 @@ uv run team-ads serve
 | `submit_change` | 提交独立本机审批过的具体计划并回读 |
 | `reconcile_operation` | 核对不明结果；不重新写入 |
 
-支持的变更：广告组关键词、Campaign 否定词、移除关键词、平均日预算、Campaign/AdGroup/AdGroupAd 暂停/启用，以及完整的 **PAUSED Search** 结构。创建包含独立预算、地域/语言、广告组、匹配类型明确的关键词、RSA 和可选 Campaign 否定词；一条原子 mutate。首版明确采用 Manual CPC、仅 Google Search、PRESENCE 地域定位。Search 创建最多 5 个广告组、500 个操作，不含自动素材、sitelinks、自动出价、PMax 或 Skills。
+现在有 **14 个 MCP 工具、20 种受控写入动作**，包括创建后的维护：
+
+| 对象 | 可执行的操作 |
+| --- | --- |
+| Search 系列 | 创建；修改名称、开始/结束时间、网络、地域匹配方式、网址后缀；暂停/启用；移除 |
+| 预算与出价 | 调整平均日预算；手动 CPC、最大化点击、最大化转化（可选目标 CPA）、最大化转化价值（可选目标 ROAS）；修改广告组/关键词 CPC |
+| 广告组 | 在已有系列中新增；修改名称/出价；暂停/启用；移除 |
+| RSA 广告 | 在已有广告组中新增；修改标题、描述、落地页、显示路径；暂停/启用；移除关联 |
+| 关键词/否定词 | 添加、移除、替换文字/匹配方式；正向关键词可暂停/启用、修改/清除单独 CPC 和网址；否定词支持系列及广告组级 |
+| 定位与排期 | 创建后调整包含/排除地区、语言、整周投放时段；调整现有设备系数或排除设备 |
+| 系列素材 | 附加链接、宣传信息、结构化摘要的添加、内容替换及关联移除 |
+
+完整 Search 创建仍默认 Manual CPC、仅 Google Search、PRESENCE 定位，最多 5 个广告组；创建后可通过上述接口修改。新系列、广告组和 RSA 固定 PAUSED，每个计划最多 500 个操作。已有资源不要求由本 MCP 创建。具体输入、列表替换/清空语义、Google 不可修改字段的替换方式，见 [创建后维护](docs/MAINTENANCE.md)。
 
 读取结果注明数据源、API 版本、获取时间、账户时区、币种和日期口径。未知的数据截止时间为 null；空结果不解释成零；转化配置存在不证明事件回传成功。
 
@@ -50,6 +63,6 @@ uv run ruff format --check src tests
 
 ## 项目边界
 
-本目录是独立 Git 仓库，分支 `codex/independent-ads-mcp`；没有远程仓库。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。不修改 Codex 全局 MCP 配置、不部署、不改 Google Cloud、不触及 Invoko。
+本目录是独立 Git 仓库，没有远程仓库。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。不修改 Codex 全局 MCP 配置、不部署、不改 Google Cloud、不触及 Invoko。
 
 这是一台可信 macOS 主机上的团队工具，不是租户隔离服务。拥有同一 OS 用户完整文件/代码权限的进程仍属于可信边界。多人远程使用需要独立服务身份、客户端身份验证、权限存储和审批通道，不能直接把 stdio 包装成无认证 HTTP。

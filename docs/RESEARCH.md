@@ -41,4 +41,13 @@ REST 使用 Personal Access Token；文档提供 Idempotency-Key 并要求多账
 
 ## 未声称的能力
 
-不是 Adspirer 完整复刻。没有私有策略算法、全平台支持、自动投放 Skills、多用户远程 HTTP、安全隔离部署或真实广告效果验证。Search 首版限定手动 CPC，以便在转化回传尚无证据时保持创建行为明确；后续自动出价/附加资产可在当前计划机制上扩展。
+不是 Adspirer 完整复刻。没有私有策略算法、全平台支持、自动投放 Skills、多用户远程 HTTP、安全隔离部署或真实广告效果验证。Search 初始创建仍用手动 CPC；创建后支持显式设置标准自动出价和系列附加素材，不能由配置存在推断转化回传有效。
+
+## 创建后维护补充核对（2026-10-13）
+
+- [更新 RSA 官方示例](https://developers.google.com/google-ads/api/samples/update-responsive-search-ad)：通过 AdService 的 AdOperation 更新已有标题、描述和最终网址。本项目将同一操作纳入 GoogleAdsService 原子计划，并检查全部广告关联。
+- [AdGroupCriterion v25](https://developers.google.com/google-ads/api/reference/rpc/v25/AdGroupCriterion)：关键词内容和 negative 不可变；改文字/匹配方式使用移除并新建，不能声称原资源及其统计得到保留。
+- [标准与组合出价](https://developers.google.com/google-ads/api/docs/campaigns/bidding/assign-strategies)、[策略类型](https://developers.google.com/google-ads/api/docs/campaigns/bidding/strategy-types)：本系列标准策略与共享策略分别管理。目标 CPA/ROAS 使用 MaximizeConversions/MaximizeConversionValue 的可选目标。
+- [定位 criteria](https://developers.google.com/google-ads/api/docs/targeting/criteria)、[设备出价调整](https://developers.google.com/google-ads/api/docs/campaigns/bidding/manage-bid-modifiers)：定位和时段通过 criterion 管理，出价系数是否生效取决于策略。
+- [素材概览](https://developers.google.com/google-ads/api/docs/assets/overview)：素材本体与资源关联分离。本次只维护系列人工 sitelink/callout/structured snippet 的关联，内容变化使用新素材，避免改动其他系列共享内容。
+- 查询字段名称与官方 [campaign](https://developers.google.com/google-ads/api/fields/v25/campaign)、[ad_group_ad](https://developers.google.com/google-ads/api/fields/v25/ad_group_ad)、[ad_group_criterion](https://developers.google.com/google-ads/api/fields/v25/ad_group_criterion)、[campaign_criterion](https://developers.google.com/google-ads/api/fields/v25/campaign_criterion)、[campaign_asset](https://developers.google.com/google-ads/api/fields/v25/campaign_asset) 及相关资源字段表核对；v25 系列日期使用 start_date_time/end_date_time。字段存在和 SDK 序列化通过仍不等于真实 GAQL/API 预检通过。

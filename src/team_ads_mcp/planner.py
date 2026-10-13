@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from .errors import AdsError
 from .models import (
     AddKeywords,
@@ -65,6 +67,17 @@ def not_removed(row, resource):
 
 
 def compile_plan(provider, settings, request, plan_id):
+    from .maintenance import compile_maintenance
+
+    prepared = compile_maintenance(provider, settings, request, plan_id)
+    if prepared is None:
+        prepared = compile_initial(provider, settings, request, plan_id)
+    if len(prepared["operations"]) > 500:
+        raise AdsError("PLAN_TOO_LARGE", "单计划最多 500 项操作，请缩小范围")
+    return prepared
+
+
+def compile_initial(provider, settings, request, plan_id):
     account, change = request.account, request.change
     metadata = provider.account(account)
     if metadata.get("manager"):
@@ -504,6 +517,8 @@ def compile_plan(provider, settings, request, plan_id):
         warnings.append("Campaign、AdGroup 和 RSA 均固定 PAUSED；创建成功不代表政策审核或投放成功")
     if len(operations) > 500:
         raise AdsError("PLAN_TOO_LARGE", "首版单计划最多 500 项操作，请缩小范围")
+    if not operations:
+        raise AdsError("UNSUPPORTED_CHANGE", "未实现的变更类型")
     return {"before": before, "operations": operations, "checks": checks, "warnings": warnings}
 
 
@@ -536,7 +551,26 @@ def verify(provider, account, checks):
     evidence, complete = [], True
     for item in checks:
         rows = query_rows(provider, account, item["resource"], item["fields"], item["condition"])
-        passed = matches(rows, item["expected"])
+        compared = deepcopy(rows)
+        # Selected optional protobuf scalars may be absent after a field-mask clear.
+        # Only explicitly declared clear paths are normalized; all other missing data fails.
+        defaults = dict(item.get("default_values", {}))
+        for path in item.get("cleared_paths", []):
+            keys = path.split(".")
+            default = item["expected"][0]
+            for key in keys:
+                default = default[key]
+            defaults[path] = default
+        for path, default in defaults.items():
+            keys = path.split(".")
+            if default not in (0, False, "", []):
+                raise AdsError("INVALID_CLEAR_CHECK", "清除字段的期望值必须是默认值")
+            for row in compared:
+                node = row
+                for key in keys[:-1]:
+                    node = node.setdefault(key, {})
+                node.setdefault(keys[-1], default)
+        passed = matches(compared, item["expected"])
         complete = complete and passed
         evidence.append(
             {"resource": item["resource"], "matches_expected": passed, "observed": rows}

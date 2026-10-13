@@ -178,7 +178,27 @@ def query_rows(provider, account, resource, fields, condition=""):
     query = f"SELECT {', '.join(fields)} FROM {resource}"
     if condition:
         query += " WHERE " + condition
-    return sorted(provider.search(account, query), key=canonical)
+    return sorted(
+        (project_row(row, fields) for row in provider.search(account, query)), key=canonical
+    )
+
+
+def project_row(row, fields):
+    """Discard unselected protobuf defaults; they are not remote observations."""
+    result = {}
+    for field in fields:
+        keys = ["type_" if part == "type" else part for part in field.split(".")]
+        value = row
+        for key in keys:
+            if not isinstance(value, dict) or key not in value:
+                break
+            value = value[key]
+        else:
+            node = result
+            for key in keys[:-1]:
+                node = node.setdefault(key, {})
+            node[keys[-1]] = value
+    return result
 
 
 def one(provider, account, resource, fields, resource_name):

@@ -50,7 +50,7 @@ class Engine:
         compiled = compile_plan(self.provider, self.settings, request, plan_id)
         self.provider.mutate(request.account, compiled["operations"], validate_only=True)
         body = {
-            "request": request.model_dump(mode="json"),
+            "request": request.model_dump(mode="json", exclude_none=True),
             "binding": self.settings.binding(),
             "expires_at": (
                 datetime.now(UTC) + timedelta(seconds=self.settings.plan_ttl_seconds)

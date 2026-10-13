@@ -19,8 +19,8 @@ from . import __version__
 from .config import API_VERSION, load_settings, state_path
 from .engine import Engine
 from .errors import AdsError, safe_error
-from .models import Account, DateRange, PlanInput, PositiveId, StrictModel
-from .provider import GoogleProvider, literal, utc_now
+from .models import Account, CampaignRef, DateRange, GroupRef, PlanInput, PositiveId, StrictModel
+from .provider import GoogleProvider, literal, project_row, utc_now
 
 
 class Empty(StrictModel):
@@ -53,6 +53,17 @@ class KeywordInput(AccountInput):
 
 class OperationInput(StrictModel):
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class ResourcesInput(AccountInput):
+    resource: Literal[
+        "campaigns", "ad_groups", "ads", "keywords", "campaign_criteria", "campaign_assets"
+    ]
+    campaign: CampaignRef | None = None
+    ad_group: GroupRef | None = None
+    ad_resource: str | None = Field(default=None, pattern=r"^customers/[0-9]{10}/ads/[1-9][0-9]*$")
+    include_removed: bool = False
+    max_rows: int = Field(default=1000, ge=1, le=10000)
 
 
 def create_server(engine: Engine):
@@ -169,6 +180,49 @@ def create_server(engine: Engine):
         engine.check_integrity(plan)
         return {"plan": plan, "events": engine.ledger.events(arg.operation_id)}
 
+    def resources(arg):
+        from .maintenance import (
+            ASSET_FIELDS,
+            CAMPAIGN_EDIT_FIELDS,
+            KEYWORD_FIELDS,
+            RSA_FIELDS,
+            TARGET_FIELDS,
+        )
+        from .planner import GROUP_FIELDS
+
+        settings.policy(arg.account)
+        for name in [arg.campaign, arg.ad_group, arg.ad_resource]:
+            if name and name.split("/")[1] != arg.account.customer_id:
+                raise AdsError("CROSS_ACCOUNT_RESOURCE", "资源属于其他账户")
+        resource, fields = {
+            "campaigns": ("campaign", CAMPAIGN_EDIT_FIELDS),
+            "ad_groups": ("ad_group", [*GROUP_FIELDS, "ad_group.type"]),
+            "ads": ("ad_group_ad", RSA_FIELDS),
+            "keywords": ("ad_group_criterion", KEYWORD_FIELDS),
+            "campaign_criteria": ("campaign_criterion", TARGET_FIELDS),
+            "campaign_assets": ("campaign_asset", ASSET_FIELDS),
+        }[arg.resource]
+        conditions = [] if arg.include_removed else [f"{resource}.status != 'REMOVED'"]
+        if arg.campaign:
+            conditions.append(f"campaign.resource_name = {literal(arg.campaign)}")
+        if arg.ad_group:
+            if arg.resource not in {"ad_groups", "ads", "keywords"}:
+                raise AdsError("INVALID_RESOURCE_FILTER", "ad_group 仅用于广告组、广告、关键词列表")
+            conditions.append(f"ad_group.resource_name = {literal(arg.ad_group)}")
+        if arg.ad_resource:
+            if arg.resource != "ads":
+                raise AdsError("INVALID_RESOURCE_FILTER", "ad_resource 仅用于查询广告的全部关联")
+            conditions.append(f"ad_group_ad.ad.resource_name = {literal(arg.ad_resource)}")
+        if arg.resource == "keywords":
+            conditions.append("ad_group_criterion.type = 'KEYWORD'")
+        query = f"SELECT {', '.join(dict.fromkeys(fields))} FROM {resource}"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        return envelope(
+            [project_row(row, fields) for row in provider.search(arg.account, query, arg.max_rows)],
+            arg.account,
+        )
+
     # schema, description, callable, read_only, idempotent
     registry = {
         "connection_status": (
@@ -220,6 +274,13 @@ def create_server(engine: Engine):
             True,
             True,
         ),
+        "list_resources": (
+            ResourcesInput,
+            "读取可维护的 Search 系列、广告组、RSA、关键词、定位/时段/设备、Campaign 素材及完整资源 ID；默认排除 REMOVED。广告编辑前用 ad_resource 查询全部关联，填入 expected_ad_group_ads。超限报错。",
+            resources,
+            True,
+            True,
+        ),
         "performance_report": (
             ReportInput,
             "明确起止日期的 Campaign/搜索词报表；金额 micros 为账户本币，缺失值不转成零。",
@@ -236,7 +297,7 @@ def create_server(engine: Engine):
         ),
         "preview_change": (
             PlanInput,
-            "读取 before、编译原子变更并执行 Google validate_only；返回持久化计划，尚未写入广告。request_key 用于去重。",
+            "创建及创建后维护：Search 系列/广告组/RSA、预算、状态、关键词/否定词、出价策略、地区/语言、时段/设备、Campaign 素材。kind 决定动作；patch 省略字段保留，列表替换和清空语义见 schema description。读取 before/影响范围，编译原子变更并执行 Google validate_only；返回待本机人工审批的计划，尚未写入广告。request_key 去重。",
             engine.preview,
             False,
             True,
