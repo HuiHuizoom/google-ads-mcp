@@ -5,8 +5,6 @@ import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from team_ads_mcp.ledger import Ledger
-
 from .fakes import ACCOUNT, search_input
 
 
@@ -37,12 +35,13 @@ async def test_actual_stdio_initialize_list_and_unconfigured_call(tmp_path):
         assert "super-secret-value" not in json.dumps(bad.model_dump())
 
 
-async def test_full_protocol_preview_approval_submit_readback(tmp_path):
+async def test_full_protocol_preview_submit_readback(tmp_path):
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "tests.fixture_server", str(tmp_path)]
     )
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
-        await session.initialize()
+        init = await session.initialize()
+        assert "preview_change → submit_change → 远端回读" in init.instructions
         listed = await session.list_tools()
         assert len(listed.tools) == 14
         preflight = await session.call_tool("preflight", {"account": ACCOUNT.model_dump()})
@@ -52,11 +51,6 @@ async def test_full_protocol_preview_approval_submit_readback(tmp_path):
         assert not preview.is_error, preview
         plan = preview.structured_content
         assert plan["status"] == "VALIDATED"
-        blocked = await session.call_tool("submit_change", {"operation_id": plan["id"]})
-        assert blocked.is_error
-        assert blocked.structured_content["error"]["code"] == "APPROVAL_REQUIRED"
-        # Inject the test human-presence boundary outside the protocol.
-        Ledger(tmp_path).approve(plan["id"], plan["plan_hash"], "test_human_presence")
         submitted = await session.call_tool("submit_change", {"operation_id": plan["id"]})
         assert not submitted.is_error
         assert submitted.structured_content["status"] == "VERIFIED", submitted
@@ -64,7 +58,7 @@ async def test_full_protocol_preview_approval_submit_readback(tmp_path):
         assert repeated.structured_content["result"] == submitted.structured_content["result"]
         status = await session.call_tool("operation_status", {"operation_id": plan["id"]})
         assert status.structured_content["plan"]["status"] == "VERIFIED"
-        assert any(e["event"] == "APPROVED" for e in status.structured_content["events"])
+        assert not any(e["event"] == "APPROVED" for e in status.structured_content["events"])
         # Actual protocol lifecycle: discover a newly created ad, then edit it in a later plan.
         ads = await session.call_tool(
             "list_resources", {"account": ACCOUNT.model_dump(), "resource": "ads"}
@@ -94,9 +88,6 @@ async def test_full_protocol_preview_approval_submit_readback(tmp_path):
         edit = await session.call_tool("preview_change", change)
         assert not edit.is_error, edit
         plan = edit.structured_content
-        denied = await session.call_tool("submit_change", {"operation_id": plan["id"]})
-        assert denied.is_error
-        Ledger(tmp_path).approve(plan["id"], plan["plan_hash"], "test_human_presence")
         edited = await session.call_tool("submit_change", {"operation_id": plan["id"]})
         assert edited.structured_content["status"] == "VERIFIED", edited
         current = await session.call_tool(

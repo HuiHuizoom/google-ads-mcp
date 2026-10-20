@@ -9,7 +9,6 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .approval import approve_with_user_presence
 from .auth import disconnect, login
 from .config import API_VERSION, AccountPolicy, load_settings, save_settings, state_path
 from .errors import safe_error
@@ -33,7 +32,7 @@ def parser():
     configure.add_argument("--customer-id", required=True)
     configure.add_argument("--login-customer-id")
     configure.add_argument(
-        "--allow-write", action="store_true", help="仅开放后续预览/审批流程，不直接授权广告写入"
+        "--allow-write", action="store_true", help="允许该账户通过预览校验后提交写入"
     )
     configure.add_argument("--max-daily-budget", default="100", help="账户本币字符串")
     configure.add_argument("--auth-mode", choices=["oauth", "adc"], default="oauth")
@@ -47,8 +46,7 @@ def parser():
     )
     for command, help_text in [
         ("show-operation", "显示完整 before/after 计划"),
-        ("approve", "原生窗口审核 + macOS 本机身份验证；尚不提交"),
-        ("submit", "提交已审批计划并回读"),
+        ("submit", "提交已预览校验的计划并回读"),
         ("reconcile", "核对结果不明的操作，绝不重发"),
     ]:
         child = commands.add_parser(command, help=help_text)
@@ -105,8 +103,6 @@ def main():
             engine = make_engine()
             if args.command == "show-operation":
                 result = engine.ledger.get(args.operation_id)
-            elif args.command == "approve":
-                result = approve_with_user_presence(engine, args.operation_id)
             elif args.command == "submit":
                 result = engine.submit(args.operation_id)
             else:

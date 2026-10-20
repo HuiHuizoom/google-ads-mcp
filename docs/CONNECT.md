@@ -36,9 +36,9 @@ uv run team-ads configure \
 uv run team-ads auth login --client-file /absolute/path/to/downloaded-desktop-client.json
 ```
 
-浏览器打开 Google 授权，loopback 只监听 `127.0.0.1` 随机端口，最多等待 180 秒。使用 PKCE S256、OAuth state 与离线访问；程序检查 JSON 所属项目及官方端点。OAuth client secret 和 refresh token 写入 OS Keychain，MCP 不提供读凭据、登录或审批接口。项目文件不保存 token。下载的原始 JSON 仍由用户负责安全保管，不加入 Git。
+浏览器打开 Google 授权，loopback 只监听 `127.0.0.1` 随机端口，最多等待 180 秒。使用 PKCE S256、OAuth state 与离线访问；程序检查 JSON 所属项目及官方端点。OAuth client secret 和 refresh token 写入 OS Keychain，MCP 不提供读凭据或登录接口。项目文件不保存 token。下载的原始 JSON 仍由用户负责安全保管，不加入 Git。
 
-macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring 后端，程序直接拒绝。授权刷新失败/撤销返回 `AUTH_RECONNECT_REQUIRED`，需要再次登录。重新登录会使旧审批失效；已有不明操作仍可只读核对。
+macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring 后端，程序直接拒绝。授权刷新失败/撤销返回 `AUTH_RECONNECT_REQUIRED`，需要再次登录。重新登录会使旧的待提交计划失效；已有不明操作仍可只读核对。正常写入复用已有授权，不要求逐次 Touch ID / Mac 密码验证。
 
 已有 ADC 用户可在 configure 中指定 `--auth-mode adc`。自行用 OAuth 所属项目的客户端生成含 `https://www.googleapis.com/auth/adwords` scope 的 ADC，或使用已获 Ads 访问权的 service account ADC。程序不会替其他应用创建/覆盖 ADC。用户 ADC 可能无法提供可验证的所属项目，`cloud_project` 在此情况下只是声明；需要在 Cloud Console 核对，不能把 quota_project_id 当成 OAuth 所属证明。
 
@@ -61,7 +61,7 @@ macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring
 }
 ```
 
-务必固定绝对状态路径，避免客户端与审批终端使用不同账本/Keychain namespace。
+务必固定绝对状态路径，避免 MCP 客户端与 CLI 使用不同账本/Keychain namespace。更新代码后重启 MCP 连接，已运行的 Python 服务不会自动加载新代码；不需要因此重新进行 Google OAuth 登录。
 
 依次调用 `connection_status` → `discover_accounts` → `preflight` → `account_hierarchy`（适用时）。`preflight` 参数：
 
@@ -77,9 +77,9 @@ macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring
 
 1. 指定明确的**测试 advertiser**，在本机为该路径开放写入。
 2. 先 preview 一条否定关键词，检查 before、影响对象、Google validate_only 与到期时间。
-3. 用户运行 `uv run team-ads approve OPERATION_ID`，在原生窗口审核，并完成 macOS 本机身份验证（Touch ID / 系统密码）。这是独立于 MCP 的用户操作；没有 `--yes` 或 `approved=true`。
-4. MCP 调用 `submit_change`；读取 VERIFIED 或 UNKNOWN，而不是只看 API 响应。
-5. 重复同一 operation_id 应返回已有结果；UNKNOWN 只调用 reconcile。
+3. MCP 调用 `submit_change`，或运行 `uv run team-ads submit OPERATION_ID`。提交前自动重新检查计划、权限、远端状态和 Google validate_only；不弹出独立审批或系统身份验证窗口。
+4. 查看提交状态和回读证据；VERIFIED 才表示所选结构完整匹配，UNKNOWN / READBACK_MISMATCH 需要继续只读核对。
+5. 重复同一 operation_id 应返回已有结果；结果不明时只调用 reconcile，不重新发送。
 6. 再以 `examples/search-plan.json` 构建 PAUSED Search，逐项核对预算、Campaign、地域语言、广告组、关键词、RSA 和暂停状态。
 
-原生组件源码已编译通过；自动 UI 工具未能绑定该本地应用，真实用户点击/身份验证仍需本机首次验收。当前无 Google 授权，因此没有向 Google 发送真实预检或变更。
+本项目不再包含原生审批组件，不需要为写入编译 Swift。用户仍负责 Google 登录与授权、确定实际变更内容；MCP 自动完成预检、提交与回读。Google 授权失效或 Google 另行要求验证时，仍须按 Google 页面完成重新授权。

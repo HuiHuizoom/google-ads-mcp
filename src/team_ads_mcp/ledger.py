@@ -90,22 +90,13 @@ class Ledger:
             (plan_id, utc_now(), event, canonical(data)),
         )
 
-    def approve(self, plan_id, plan_hash, method):
-        with self.db() as db:
-            changed = db.execute(
-                "UPDATE plans SET status='APPROVED',approval_hash=?,approval_method=?,updated_at=? "
-                "WHERE id=? AND plan_hash=? AND status='VALIDATED'",
-                (plan_hash, method, utc_now(), plan_id, plan_hash),
-            ).rowcount
-            if changed != 1:
-                raise AdsError("APPROVAL_CONFLICT", "计划状态已变化，请重新检查")
-            self.event(db, plan_id, "APPROVED", {"method": method, "plan_hash": plan_hash})
-
     def claim(self, plan_id, customer_id):
         with self.db() as db:
             row = self.decode(db.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone())
-            if row["status"] != "APPROVED" or row["approval_hash"] != row["plan_hash"]:
-                raise AdsError("APPROVAL_REQUIRED", "需要在独立本机审批界面批准当前计划")
+            # APPROVED and the approval columns are retained only for existing ledgers.
+            # Engine.submit checks integrity, permissions and expiry for both states.
+            if row["status"] not in {"VALIDATED", "APPROVED"}:
+                raise AdsError("PLAN_NOT_SUBMITTABLE", "计划状态不允许提交，请查看操作记录")
             try:
                 db.execute("INSERT INTO account_locks VALUES(?,?)", (customer_id, plan_id))
             except sqlite3.IntegrityError:

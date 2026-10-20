@@ -1,6 +1,6 @@
 # 创建后维护
 
-这些接口适用于允许账户中的已有 Search 资源，包括 Google Ads 后台创建的资源。使用官方 Google Ads Python SDK 33.0.0 / API v25。所有写入仍是 `preview_change → 本机人工审批 → submit_change → 回读`，没有直接跳过预览的更新/删除工具。
+这些接口适用于允许账户中的已有 Search 资源，包括 Google Ads 后台创建的资源。使用官方 Google Ads Python SDK 33.0.0 / API v25。所有写入都是 `preview_change → submit_change → 回读`，无需独立本机审批或逐次身份验证，没有直接跳过预览的更新/删除工具。
 
 ## 先读取，再改指定字段
 

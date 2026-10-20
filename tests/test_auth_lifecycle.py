@@ -1,18 +1,17 @@
-import hashlib
 import json
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
-from team_ads_mcp import approval, auth
-from team_ads_mcp.config import load_settings, save_settings
+from team_ads_mcp import auth
+from team_ads_mcp.cli import parser
+from team_ads_mcp.config import load_settings
 from team_ads_mcp.engine import Engine
 from team_ads_mcp.errors import AdsError
 
 from .fakes import FakeProvider, settings
 from .test_auth_provider import CLIENT
-from .test_engine import approve, status_input
+from .test_engine import status_input
 
 
 def test_login_uses_loopback_offline_pkce_and_os_store(tmp_path, monkeypatch):
@@ -39,43 +38,35 @@ def test_login_uses_loopback_offline_pkce_and_os_store(tmp_path, monkeypatch):
     assert load_settings(tmp_path).auth_epoch != "unconnected"
 
 
-def test_local_forget_invalidates_pending_approvals(tmp_path, monkeypatch):
+def test_local_forget_invalidates_pending_plans(tmp_path, monkeypatch):
     cfg = settings()
+    engine = Engine(tmp_path, cfg, FakeProvider())
+    plan = engine.preview(status_input())
     monkeypatch.setattr(auth.CredentialStore, "delete", lambda _: None)
     result = auth.disconnect(tmp_path, cfg, revoke=False)
     assert not result["remote_revocation_confirmed"]
     assert result["local_credentials_removed"]
     assert load_settings(tmp_path).auth_epoch != "unconnected"
-
-
-def test_native_cancel_never_approves(tmp_path, monkeypatch):
-    cfg = settings()
-    save_settings(tmp_path, cfg)
-    engine = Engine(tmp_path, cfg, FakeProvider())
-    plan = engine.preview(status_input())
-    monkeypatch.setattr(approval.sys, "platform", "darwin")
-    source = Path(approval.__file__).with_name("approval.swift")
-    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
-    executable = (
-        tmp_path / ("Team Ads Approval-" + source_hash + ".app") / "Contents/MacOS/TeamAdsApproval"
-    )
-    executable.parent.mkdir(parents=True)
-    executable.touch()
-    monkeypatch.setattr(
-        approval.subprocess, "run", Mock(return_value=Mock(returncode=3, stdout=""))
-    )
+    engine.settings = load_settings(tmp_path)
     with pytest.raises(AdsError) as exc:
-        approval.approve_with_user_presence(engine, plan["id"])
-    assert exc.value.code == "APPROVAL_CANCELLED"
-    assert engine.ledger.get(plan["id"])["status"] == "VALIDATED"
-    assert not list(tmp_path.glob("review-*.txt"))
+        engine.submit(plan["id"])
+    assert exc.value.code == "PLAN_BINDING_CHANGED"
+    assert not any(not v for v, _ in engine.provider.calls)
+
+
+def test_cli_submits_plans_without_an_approval_command():
+    cli = parser()
+    args = cli.parse_args(["submit", "a" * 32])
+    assert args.command == "submit"
+    assert "approve" not in cli.format_help()
+    with pytest.raises(SystemExit):
+        cli.parse_args(["approve", "a" * 32])
 
 
 def test_precommit_permission_recheck_does_not_send_write(tmp_path):
     provider = FakeProvider()
     engine = Engine(tmp_path, settings(), provider)
     plan = engine.preview(status_input())
-    approve(engine, plan)
     provider.validation_failure = AdsError("GOOGLE_REJECTED", "permission lost")
     result = engine.submit(plan["id"])
     assert result["status"] == "STALE"

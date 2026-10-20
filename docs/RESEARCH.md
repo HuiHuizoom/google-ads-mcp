@@ -37,7 +37,7 @@ REST 使用 Personal Access Token；文档提供 Idempotency-Key 并要求多账
 | [burhan29ee/google-ads-mcp-server](https://github.com/burhan29ee/google-ads-mcp-server) | `098493fc39ace45d822a33d7478a39b836685b51` | validate_only + confirm；但 confirm 是模型参数，README 仍是旧 token 接入 |
 | [get-mcp-ads/google-ads-mcp-server](https://github.com/get-mcp-ads/google-ads-mcp-server) | `1df4f0f293ac23660ace188946546f0613f52e7f` | 原子计划、plan hash、PAUSED、超时核对提示；confirm/hash 本身仍不是可信用户批准 |
 
-研究止于这两套确实相关的实现及官方/Adspirer。采用原子 GoogleAdsService.Mutate、SDK 类型和 [Google mutate 约束](https://developers.google.com/google-ads/api/docs/mutating/best-practices)，自己补齐 OS 用户审批、持久化账本、账户锁、状态变化与回读证明。
+研究止于这两套确实相关的实现及官方/Adspirer。采用原子 GoogleAdsService.Mutate、SDK 类型和 [Google mutate 约束](https://developers.google.com/google-ads/api/docs/mutating/best-practices)，自己补齐持久化账本、账户锁、状态变化与回读证明。早期实现的独立 OS 用户审批已于 2026-10-20 按用户要求移除，当前流程见 [写入模型](SAFETY.md)。
 
 ## 未声称的能力
 

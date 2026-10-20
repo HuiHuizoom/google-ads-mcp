@@ -60,13 +60,6 @@ class Engine:
         }
         return self.ledger.insert(plan_id, request.request_key, input_hash, digest(body), body)
 
-    def approval_candidate(self, plan_id):
-        plan = self.ledger.get(plan_id)
-        self.check_fresh(plan)
-        if plan["status"] != "VALIDATED":
-            raise AdsError("PLAN_NOT_APPROVABLE", "只有 VALIDATED 计划可以审批")
-        return plan
-
     def submit(self, plan_id):
         if not re.fullmatch(r"[a-f0-9]{32}", plan_id):
             raise AdsError("INVALID_OPERATION_ID", "operation_id 必须是账本返回的 32 位标识")
@@ -97,9 +90,7 @@ class Engine:
                 request = PlanInput.model_validate(plan["body"]["request"])
                 fresh = compile_plan(self.provider, self.settings, request, plan_id)
                 if digest(fresh) != digest(plan["body"]["prepared"]):
-                    raise AdsError(
-                        "REMOTE_STATE_CHANGED", "远端状态或影响范围已变化，请重新预览及审批"
-                    )
+                    raise AdsError("REMOTE_STATE_CHANGED", "远端状态或影响范围已变化，请重新预览")
                 self.provider.mutate(account, fresh["operations"], validate_only=True)
                 sent = True
                 response = self.provider.mutate(account, fresh["operations"], validate_only=False)

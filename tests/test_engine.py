@@ -25,12 +25,6 @@ def status_input(key="status-key-001"):
     )
 
 
-def approve(engine, plan):
-    # Test-only stand-in for OS-authenticated user presence. Never shipped as an MCP capability.
-    engine.approval_candidate(plan["id"])
-    engine.ledger.approve(plan["id"], plan["plan_hash"], "test_human_presence")
-
-
 def test_full_search_atomic_paused_and_idempotent(engine):
     request = PlanInput.model_validate(search_input())
     plan = engine.preview(request)
@@ -38,7 +32,6 @@ def test_full_search_atomic_paused_and_idempotent(engine):
     assert all(v for v, _ in engine.provider.calls)
     assert len(engine.provider.records["campaign"]) == 1
     assert engine.preview(request)["id"] == plan["id"]
-    approve(engine, plan)
     result = engine.submit(plan["id"])
     assert result["status"] == "VERIFIED", result
     assert result["result"]["readback"]["complete"]
@@ -49,15 +42,56 @@ def test_full_search_atomic_paused_and_idempotent(engine):
     assert len(result["result"]["readback"]["evidence"]) == 6
 
 
-def test_model_cannot_approve(engine):
+def test_validated_plan_submits_without_local_approval(engine):
     plan = engine.preview(status_input())
-    with pytest.raises(AdsError, match="审批"):
+    assert engine.submit(plan["id"])["status"] == "VERIFIED"
+    assert engine.provider.records["campaign"][CAMPAIGN]["status"] == "ENABLED"
+    assert [e["event"] for e in engine.ledger.events(plan["id"])] == [
+        "VALIDATED",
+        "IN_FLIGHT",
+        "IN_FLIGHT",
+        "VERIFIED",
+    ]
+
+
+def test_missing_preview_cannot_submit(engine):
+    with pytest.raises(AdsError) as exc:
+        engine.submit("a" * 32)
+    assert exc.value.code == "PLAN_NOT_FOUND"
+    assert not engine.provider.calls
+
+
+def test_legacy_approved_plan_survives_restart(engine):
+    plan = engine.preview(status_input())
+    # Existing installations can have a pending plan from the removed approval flow.
+    with engine.ledger.db() as db:
+        db.execute(
+            "UPDATE plans SET status='APPROVED',approval_hash=?,approval_method=? WHERE id=?",
+            (plan["plan_hash"], "macos_device_owner_authentication", plan["id"]),
+        )
+        engine.ledger.event(
+            db, plan["id"], "APPROVED", {"method": "macos_device_owner_authentication"}
+        )
+    restarted = Engine(engine.path, engine.settings, engine.provider)
+    assert restarted.submit(plan["id"])["status"] == "VERIFIED"
+    assert restarted.submit(plan["id"])["status"] == "VERIFIED"
+    assert len([x for x in engine.provider.calls if not x[0]]) == 1
+    assert len([e for e in restarted.ledger.events(plan["id"]) if e["event"] == "APPROVED"]) == 1
+
+
+@pytest.mark.parametrize("status", ["VALIDATED", "APPROVED"])
+def test_tampered_plan_cannot_submit(engine, status):
+    plan = engine.preview(status_input())
+    plan["body"]["request"]["change"]["status"] = "PAUSED"
+    with engine.ledger.db() as db:
+        db.execute(
+            "UPDATE plans SET body=?,status=? WHERE id=?",
+            (canonical(plan["body"]), status, plan["id"]),
+        )
+    with pytest.raises(AdsError) as exc:
         engine.submit(plan["id"])
+    assert exc.value.code == "PLAN_BINDING_CHANGED"
     assert not any(not v for v, _ in engine.provider.calls)
-    data = status_input().model_dump()
-    data["approved"] = True
-    with pytest.raises(ValidationError):
-        PlanInput.model_validate(data)
 
 
 def test_cross_account_and_route_isolation(engine):
@@ -89,22 +123,23 @@ def test_request_key_conflict(engine):
     assert exc.value.code == "IDEMPOTENCY_CONFLICT"
 
 
-def test_plan_expiry(engine):
+@pytest.mark.parametrize("status", ["VALIDATED", "APPROVED"])
+def test_plan_expiry(engine, status):
     plan = engine.preview(status_input())
     plan["body"]["expires_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
     with engine.ledger.db() as db:
         db.execute(
-            "UPDATE plans SET body=?,plan_hash=? WHERE id=?",
-            (canonical(plan["body"]), digest(plan["body"]), plan["id"]),
+            "UPDATE plans SET body=?,plan_hash=?,status=? WHERE id=?",
+            (canonical(plan["body"]), digest(plan["body"]), status, plan["id"]),
         )
     with pytest.raises(AdsError) as exc:
-        engine.approval_candidate(plan["id"])
+        engine.submit(plan["id"])
     assert exc.value.code == "PLAN_EXPIRED"
+    assert not any(not v for v, _ in engine.provider.calls)
 
 
-def test_remote_state_drift_consumes_approval_without_mutation(engine):
+def test_remote_state_drift_invalidates_plan_without_mutation(engine):
     plan = engine.preview(status_input())
-    approve(engine, plan)
     engine.provider.records["campaign_budget"][BUDGET]["amount_micros"] = 30_000_000
     result = engine.submit(plan["id"])
     assert result["status"] == "STALE"
@@ -112,9 +147,8 @@ def test_remote_state_drift_consumes_approval_without_mutation(engine):
     assert not any(not v for v, _ in engine.provider.calls)
 
 
-def test_config_and_credential_epoch_invalidates_approval(engine):
+def test_config_and_credential_epoch_invalidates_plan(engine):
     plan = engine.preview(status_input())
-    approve(engine, plan)
     engine.settings.auth_epoch = "new-login"
     with pytest.raises(AdsError) as exc:
         engine.submit(plan["id"])
@@ -147,7 +181,6 @@ def test_shared_budget_requires_full_impact(engine):
     data["change"]["expected_campaigns"].append(other)
     plan = engine.preview(PlanInput.model_validate(data))
     assert plan["body"]["prepared"]["warnings"]
-    approve(engine, plan)
     assert engine.submit(plan["id"])["status"] == "VERIFIED"
 
 
@@ -168,7 +201,6 @@ def test_shared_budget_requires_full_impact(engine):
 )
 def test_keywords_add_then_remove(engine, change):
     plan = engine.preview(PlanInput(account=ACCOUNT, change=change, request_key="keyword-add-01"))
-    approve(engine, plan)
     assert engine.submit(plan["id"])["status"] == "VERIFIED"
     resource = "ad_group_criterion" if change["kind"] == "add_keywords" else "campaign_criterion"
     name = next(iter(engine.provider.records[resource]))
@@ -179,14 +211,12 @@ def test_keywords_add_then_remove(engine, change):
             change={"kind": "remove_keywords", "resources": [name]},
         )
     )
-    approve(engine, removal)
     assert engine.submit(removal["id"])["status"] == "VERIFIED"
 
 
 @pytest.mark.parametrize("apply_before", [False, True])
 def test_timeout_unknown_never_resends_then_reconciles(engine, apply_before):
     plan = engine.preview(PlanInput.model_validate(search_input()))
-    approve(engine, plan)
     engine.provider.failure = TimeoutError("Bearer SECRET-MUST-NOT-LEAK")
     engine.provider.apply_before_failure = apply_before
     result = engine.submit(plan["id"])
@@ -204,14 +234,12 @@ def test_timeout_unknown_never_resends_then_reconciles(engine, apply_before):
 
 def test_partial_failure_never_success(engine):
     plan = engine.preview(status_input())
-    approve(engine, plan)
     engine.provider.failure = AdsError("PARTIAL_FAILURE", "partial failure")
     assert engine.submit(plan["id"])["status"] == "UNKNOWN"
 
 
 def test_readback_mismatch_keeps_lock(engine, monkeypatch):
     plan = engine.preview(status_input())
-    approve(engine, plan)
     original = engine.provider.mutate
 
     def mutate(account, ops, validate_only):
@@ -233,7 +261,6 @@ def test_validation_failure_never_creates_plan(engine):
 
 def test_concurrent_claims_only_one(engine):
     plan = engine.preview(status_input())
-    approve(engine, plan)
 
     def claim():
         try:

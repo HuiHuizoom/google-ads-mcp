@@ -1,4 +1,4 @@
-"""MCP SDK v2 stdio entry point. No token or approval capabilities are exposed."""
+"""MCP SDK v2 stdio entry point. Credentials are managed outside the protocol."""
 
 from __future__ import annotations
 
@@ -297,21 +297,21 @@ def create_server(engine: Engine):
         ),
         "preview_change": (
             PlanInput,
-            "创建及创建后维护：Search 系列/广告组/RSA、预算、状态、关键词/否定词、出价策略、地区/语言、时段/设备、Campaign 素材。kind 决定动作；patch 省略字段保留，列表替换和清空语义见 schema description。读取 before/影响范围，编译原子变更并执行 Google validate_only；返回待本机人工审批的计划，尚未写入广告。request_key 去重。",
+            "创建及创建后维护：Search 系列/广告组/RSA、预算、状态、关键词/否定词、出价策略、地区/语言、时段/设备、Campaign 素材。kind 决定动作；patch 省略字段保留，列表替换和清空语义见 schema description。读取 before/影响范围，编译原子变更并执行 Google validate_only；返回可供 submit_change 提交的计划，尚未写入广告。request_key 去重。",
             engine.preview,
             False,
             True,
         ),
         "operation_status": (
             OperationInput,
-            "读取变更计划、审批状态和事件账本。",
+            "读取变更计划、提交状态和事件账本。",
             operation_status,
             True,
             True,
         ),
         "submit_change": (
             OperationInput,
-            "只提交已在独立本机界面批准的计划。没有 approved/confirm 参数；超时后先 reconcile，不重复提交。",
+            "提交 preview_change 返回且仍有效的计划，并回读确认。提交前再次检查权限、远端状态和 Google validate_only；不弹出本机审批或身份验证窗口。超时后先 reconcile，不重复提交。",
             lambda a: engine.submit(a.operation_id),
             False,
             True,
@@ -384,7 +384,7 @@ def create_server(engine: Engine):
         version=__version__,
         on_list_tools=list_tools,
         on_call_tool=call_tool,
-        instructions="先 connection_status / preflight。所有写入必须 preview_change → 本机人工审批 → submit_change → 远端回读。不要把配置、PAUSED 创建或 ENABLED 当成真实曝光/转化证明。",
+        instructions="先 connection_status / preflight。所有写入必须 preview_change → submit_change → 远端回读，无独立本机审批或逐次身份验证。不要把配置、PAUSED 创建或 ENABLED 当成真实曝光/转化证明。",
     )
 
 

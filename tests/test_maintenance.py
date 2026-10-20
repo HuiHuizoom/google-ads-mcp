@@ -6,13 +6,11 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from team_ads_mcp.approval import review_text
 from team_ads_mcp.engine import Engine
 from team_ads_mcp.errors import AdsError
 from team_ads_mcp.models import PlanInput
 
 from .fakes import ACCOUNT, CAMPAIGN, GROUP, ROOT, FakeProvider, settings
-from .test_engine import approve
 
 AD = ROOT + "/adGroupAds/31~41"
 KEYWORD = ROOT + "/adGroupCriteria/31~51"
@@ -94,8 +92,6 @@ def preview(engine, change):
 
 def apply(engine, change):
     plan = preview(engine, change)
-    assert "变更前 → 变更后" in review_text(plan)
-    approve(engine, plan)
     result = engine.submit(plan["id"])
     assert result["status"] == "VERIFIED", result.get("result")
     assert result["result"]["readback"]["complete"]
@@ -458,7 +454,9 @@ def test_device_bid_updates_and_excludes(engine):
 @pytest.mark.parametrize("resource", [CAMPAIGN, GROUP, AD])
 def test_remove_existing_resource_explains_effect(engine, resource):
     result = apply(engine, {"kind": "remove_resource", "resource": resource})
-    assert "移除后不能重新启用" in review_text(result)
+    assert any(
+        "移除后不能重新启用" in warning for warning in result["body"]["prepared"]["warnings"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -516,7 +514,6 @@ def test_changed_post_creation_snapshot_blocks_submit(engine):
             "patch": {"path2": "new"},
         },
     )
-    approve(engine, plan)
     engine.provider.records["ad_group_ad"][AD]["ad"]["final_urls"] = [
         "https://example.com/changed-elsewhere"
     ]
@@ -578,16 +575,13 @@ def test_clear_does_not_hide_a_nonempty_remote_value(engine, monkeypatch):
             "patch": {"path2": ""},
         },
     )
-    approve(engine, plan)
     assert engine.submit(plan["id"])["status"] == "READBACK_MISMATCH"
 
 
-def test_no_post_creation_approval_bypass(engine):
+def test_post_creation_removal_submits_from_preview(engine):
     plan = preview(engine, {"kind": "remove_resource", "resource": CAMPAIGN})
-    with pytest.raises(AdsError) as exc:
-        engine.submit(plan["id"])
-    assert exc.value.code == "APPROVAL_REQUIRED"
-    assert engine.provider.records["campaign"][CAMPAIGN]["status"] == "PAUSED"
+    assert engine.submit(plan["id"])["status"] == "VERIFIED"
+    assert engine.provider.records["campaign"][CAMPAIGN]["status"] == "REMOVED"
 
 
 @pytest.mark.parametrize(
@@ -613,7 +607,6 @@ def test_no_post_creation_approval_bypass(engine):
 )
 def test_ambiguous_new_write_only_reconciles_never_resends(engine, change):
     plan = preview(engine, change)
-    approve(engine, plan)
     engine.provider.failure = TimeoutError("unknown receipt")
     engine.provider.apply_before_failure = True
     assert engine.submit(plan["id"])["status"] == "UNKNOWN"

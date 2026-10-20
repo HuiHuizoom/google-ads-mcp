@@ -2,7 +2,7 @@
 
 团队自用、独立运行的 Google Ads MCP 后端。Python + 官方 Google Ads 客户端 + MCP stdio。无需 Adspirer 账户或托管后端。
 
-当前状态：**本地可运行；尚未连接真实 Google Ads；尚未验证真实写入。** 只读/写入协议与故障恢复已通过离线测试，真实 Google 政策、账户角色和资源兼容性仍需授权后验收。
+写入流程：**预览校验 → 提交 → 远端回读**。无需独立审批窗口，也不逐次要求 Touch ID / Mac 密码。Google OAuth 登录和 OS Keychain 凭据存储保留；真实账户接入与写入验收需分别核对，详见 [验收记录](docs/VERIFICATION.md)。
 
 ## 启动
 
@@ -31,8 +31,8 @@ uv run team-ads serve
 | `performance_report` | 明确日期的 Campaign / 搜索词报表 |
 | `keyword_ideas` | 地域、语言、种子关键词研究 |
 | `preview_change` | before/after、SDK 校验、Google validate_only、持久化计划 |
-| `operation_status` | 计划、审批状态、操作账本 |
-| `submit_change` | 提交独立本机审批过的具体计划并回读 |
+| `operation_status` | 计划、提交状态、操作账本 |
+| `submit_change` | 提交已预览校验且仍有效的计划并回读 |
 | `reconcile_operation` | 核对不明结果；不重新写入 |
 
 现在有 **14 个 MCP 工具、20 种受控写入动作**，包括创建后的维护：
@@ -65,4 +65,4 @@ uv run ruff format --check src tests
 
 本目录是独立 Git 仓库，没有远程仓库。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。不修改 Codex 全局 MCP 配置、不部署、不改 Google Cloud、不触及 Invoko。
 
-这是一台可信 macOS 主机上的团队工具，不是租户隔离服务。拥有同一 OS 用户完整文件/代码权限的进程仍属于可信边界。多人远程使用需要独立服务身份、客户端身份验证、权限存储和审批通道，不能直接把 stdio 包装成无认证 HTTP。
+这是一台可信主机上的团队工具，不是租户隔离服务。获准连接此 MCP 的客户端可在账户配置允许的范围内提交写入，不再有独立本机人工审批。拥有同一 OS 用户完整文件/代码权限的进程仍属于可信边界。多人远程使用需要独立服务身份、客户端身份验证和权限存储，不能直接把 stdio 包装成无认证 HTTP。

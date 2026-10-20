@@ -5,14 +5,13 @@ from team_ads_mcp.errors import AdsError
 from team_ads_mcp.models import PlanInput
 
 from .fakes import ACCOUNT, BUDGET, CAMPAIGN, FakeProvider, search_input, settings
-from .test_engine import approve, status_input
+from .test_engine import status_input
 
 
 def test_readback_permission_failure_is_unknown_not_rejected(tmp_path, monkeypatch):
     provider = FakeProvider()
     engine = Engine(tmp_path, settings(), provider)
     plan = engine.preview(status_input())
-    approve(engine, plan)
     original = provider.mutate
 
     def mutate(account, ops, validate_only):
@@ -38,7 +37,6 @@ def test_recovery_survives_restart_reauth_and_disabled_writes(tmp_path):
     config = settings()
     engine = Engine(tmp_path, config, provider)
     plan = engine.preview(PlanInput.model_validate(search_input()))
-    approve(engine, plan)
     provider.failure = TimeoutError()
     provider.apply_before_failure = True
     assert engine.submit(plan["id"])["status"] == "UNKNOWN"
@@ -54,12 +52,10 @@ def test_unknown_blocks_other_operation_for_same_account(tmp_path):
     provider = FakeProvider()
     engine = Engine(tmp_path, settings(), provider)
     first = engine.preview(status_input())
-    approve(engine, first)
     provider.failure = TimeoutError()
     assert engine.submit(first["id"])["status"] == "UNKNOWN"
     provider.failure = None
     second = engine.preview(status_input("second-key-001"))
-    approve(engine, second)
     with pytest.raises(AdsError) as exc:
         engine.submit(second["id"])
     assert exc.value.code == "ACCOUNT_BUSY"

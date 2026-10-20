@@ -1,6 +1,27 @@
 # 本地验收记录
 
-核对日期：2026-10-12（Asia/Shanghai）。本轮没有使用真实 Google 凭据，没有对 Google Ads 进行任何真实写入。
+## 2026-10-20：移除本机审批，0.3.0
+
+本轮按用户要求删除独立审核窗口、`team-ads approve` 命令和逐次 macOS 身份验证。流程改为 `preview_change → submit_change → 远端回读`，Google OAuth 与 OS Keychain 实现保持不变。本轮未使用真实凭据、未向 Google Ads 发送写入，也未修改现有操作账本或解除已有账户锁。
+
+| 检查 | 结果 | 证据边界 |
+| --- | --- | --- |
+| `uv run pytest -q` | **89 passed** | Google 响应使用离线模拟器，含真实 SDK 消息校验 |
+| stdio 完整写入流程 | 通过 | 真实子进程完成预览、直接提交、回读、重复提交及创建后修改，无外部审批注入 |
+| 计划与恢复约束 | 通过 | 无预览、篡改、过期、权限变化、共享影响、并发、未知结果和账户锁继续受控 |
+| 旧账本兼容 | 通过 | 旧 APPROVED 计划重启后可提交；历史事件保留；过期或篡改的旧计划仍拒绝 |
+| OAuth 回归 | 通过 | PKCE / loopback / 离线授权与安全存储测试保留；退出登录使待提交计划失效 |
+| `ruff check` / `format --check` | 通过 | src、tests、scripts |
+| 无凭据协议 smoke | 通过 | server 0.3.0，14 工具，initialize / list / call 成功，真实 Google 写入为 0 |
+| CLI 帮助与参数 | 通过 | 保留 auth / show-operation / submit / reconcile，移除 approve |
+| `uv lock --offline` / `uv sync --frozen` / `uv build` | 通过 | 已安装 0.3.0；wheel 与 sdist 不再包含审批 Python / Swift 组件，也不含私有状态 |
+| `git diff --check` | 通过 | 无空白错误 |
+
+已运行的 MCP 服务不会热加载此改动，需重启连接后生效。无需因为本次升级重新进行 OAuth 登录。本轮离线通过不替代新版在真实账户上的写入验收，也不代表解决了此前操作的回读差异。
+
+## 历史记录：2026-10-12
+
+以下是当时 0.1.0 的验收范围，其中原生审批组件现已移除，不再适用于当前流程。当时没有使用真实 Google 凭据，没有对 Google Ads 进行任何真实写入。
 
 | 检查 | 结果 | 证据边界 |
 | --- | --- | --- |
@@ -27,4 +48,4 @@ uv run python scripts/smoke_protocol.py
 
 预期有 `initialize/tools_list/tools_call: passed`、`google_connected: false`、`google_mutations: 0`。此脚本使用临时空配置，不读取 OS Keychain。
 
-下一阶段仍需：用户指定 Cloud 项目与测试 Ads 路径、完成 OAuth/Cloud 访问等级准备；先核对真实读取，再单独授权一条测试写入，并完成人工审批界面验收。真实广告启用、花费与转化效果不在本轮已验证范围内。
+当时尚待验收：真实 OAuth、账户读取和测试写入。原生审批界面现已删除，无需继续验收；真实广告启用、花费与转化效果不能由本地测试证明。
