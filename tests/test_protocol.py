@@ -27,7 +27,8 @@ async def test_actual_stdio_initialize_list_and_unconfigured_call(tmp_path):
         assert not any("approve" == t.name for t in listed.tools)
         preview_schema = next(t.input_schema for t in listed.tools if t.name == "preview_change")
         kinds = preview_schema["properties"]["change"]["discriminator"]["mapping"]
-        assert len(kinds) == 27 and "create_pmax" in kinds and "set_asset_group_signals" in kinds
+        assert len(kinds) == 41 and "create_pmax" in kinds and "set_asset_group_signals" in kinds
+        assert "create_channel_campaign" in kinds and "set_conversion_goals" in kinds
         assert "省略字段保留原值" in preview_schema["$defs"]["RSAPatch"]["description"]
         status = await session.call_tool("connection_status", {})
         assert not status.is_error

@@ -67,10 +67,16 @@ def not_removed(row, resource):
 
 
 def compile_plan(provider, settings, request, plan_id):
+    from .channels import compile_channels
+    from .conversions import compile_conversions
     from .maintenance import compile_maintenance
     from .pmax import compile_pmax
 
-    prepared = compile_pmax(provider, settings, request, plan_id)
+    prepared = compile_conversions(provider, settings, request, plan_id)
+    if prepared is None:
+        prepared = compile_channels(provider, settings, request, plan_id)
+    if prepared is None:
+        prepared = compile_pmax(provider, settings, request, plan_id)
     if prepared is None:
         prepared = compile_maintenance(provider, settings, request, plan_id)
     if prepared is None:

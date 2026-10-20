@@ -701,6 +701,377 @@ class SetPMaxBrandAssets(StrictModel):
     assets: list[AssetLink] = Field(min_length=2, max_length=6)
 
 
+ConversionRef = Annotated[
+    str, StringConstraints(pattern=r"^customers/[0-9]{10}/conversionActions/[1-9][0-9]*$")
+]
+CustomGoalRef = Annotated[
+    str, StringConstraints(pattern=r"^customers/[0-9]{10}/customConversionGoals/[1-9][0-9]*$")
+]
+UserListRef = Annotated[
+    str, StringConstraints(pattern=r"^customers/[0-9]{10}/userLists/[1-9][0-9]*$")
+]
+ConversionCategory = Literal[
+    "DEFAULT",
+    "PAGE_VIEW",
+    "PURCHASE",
+    "SIGNUP",
+    "DOWNLOAD",
+    "ADD_TO_CART",
+    "BEGIN_CHECKOUT",
+    "SUBSCRIBE_PAID",
+    "PHONE_CALL_LEAD",
+    "IMPORTED_LEAD",
+    "SUBMIT_LEAD_FORM",
+    "BOOK_APPOINTMENT",
+    "REQUEST_QUOTE",
+    "GET_DIRECTIONS",
+    "OUTBOUND_CLICK",
+    "CONTACT",
+    "ENGAGEMENT",
+    "QUALIFIED_LEAD",
+    "CONVERTED_LEAD",
+]
+ConversionOrigin = Literal[
+    "WEBSITE", "APP", "CALL_FROM_ADS", "STORE", "YOUTUBE_HOSTED", "GOOGLE_HOSTED"
+]
+
+
+class ConversionValues(Patch):
+    """省略保留原值；0 是有效转化价值。币种采用 ISO 4217。"""
+
+    default_value: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    default_currency_code: Currency | None = None
+    always_use_default_value: bool | None = None
+
+
+class ConversionActionPatch(Patch):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    status: Literal["ENABLED", "HIDDEN"] | None = None
+    category: ConversionCategory | None = None
+    primary_for_goal: bool | None = None
+    counting_type: Literal["ONE_PER_CLICK", "MANY_PER_CLICK"] | None = None
+    click_through_lookback_window_days: int | None = Field(default=None, ge=1, le=90)
+    view_through_lookback_window_days: int | None = Field(default=None, ge=1, le=30)
+    value_settings: ConversionValues | None = None
+
+
+class CreateConversionAction(StrictModel):
+    """建立网站/离线转化配置，不安装埋点、不上传事件；默认 secondary，不能把创建成功当成收到转化。"""
+
+    kind: Literal["create_conversion_action"]
+    name: str = Field(min_length=1, max_length=80)
+    type: Literal["WEBPAGE", "UPLOAD_CLICKS", "UPLOAD_CALLS"]
+    category: ConversionCategory
+    primary_for_goal: bool = False
+    counting_type: Literal["ONE_PER_CLICK", "MANY_PER_CLICK"] = "ONE_PER_CLICK"
+    click_through_lookback_window_days: int = Field(default=30, ge=1, le=90)
+    value_settings: ConversionValues | None = None
+    expected_campaigns: list[CampaignRef] = Field(max_length=1000)
+
+
+class UpdateConversionAction(StrictModel):
+    """创建后修改配置；须列出账户全部未移除系列以核对影响范围。不修改外部导入类型、所有权或类型。"""
+
+    kind: Literal["update_conversion_action"]
+    conversion_action: ConversionRef
+    patch: ConversionActionPatch
+    expected_campaigns: list[CampaignRef] = Field(max_length=1000)
+
+
+class RemoveConversionAction(StrictModel):
+    kind: Literal["remove_conversion_action"]
+    conversion_action: ConversionRef
+    expected_campaigns: list[CampaignRef] = Field(max_length=1000)
+
+
+class GoalToggle(StrictModel):
+    category: ConversionCategory
+    origin: ConversionOrigin
+    biddable: bool
+
+
+class SetConversionGoals(StrictModel):
+    """修改已由 Google 生成的目标。campaign 省略表示账户默认目标；提供时只修改该系列。CUSTOMER 恢复继承；CAMPAIGN 切换为系列级目标。只改传入目标，未传入保留。"""
+
+    kind: Literal["set_conversion_goals"]
+    campaign: CampaignRef | None = None
+    goals: list[GoalToggle] = Field(default_factory=list, max_length=100)
+    goal_config_level: Literal["CUSTOMER", "CAMPAIGN"] | None = None
+    custom_conversion_goal: CustomGoalRef | Literal[""] | None = None
+    expected_campaigns: list[CampaignRef] = Field(max_length=1000)
+
+    @model_validator(mode="after")
+    def valid(self):
+        if not self.campaign and (
+            self.goal_config_level is not None or self.custom_conversion_goal is not None
+        ):
+            raise ValueError("目标来源和自定义目标只适用于 campaign")
+        if (
+            not self.goals
+            and self.goal_config_level is None
+            and self.custom_conversion_goal is None
+        ):
+            raise ValueError("至少修改一个目标或目标来源")
+        if self.goal_config_level == "CUSTOMER" and (self.goals or self.custom_conversion_goal):
+            raise ValueError("恢复账户默认目标时不能同时指定系列目标")
+        keys = [(g.category, g.origin) for g in self.goals]
+        if len(keys) != len(set(keys)):
+            raise ValueError("重复转化目标")
+        return self
+
+
+class CreateCustomConversionGoal(StrictModel):
+    kind: Literal["create_custom_conversion_goal"]
+    name: str = Field(min_length=1, max_length=80)
+    conversion_actions: list[ConversionRef] = Field(min_length=1, max_length=100)
+
+
+class CustomGoalPatch(Patch):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    conversion_actions: list[ConversionRef] | None = Field(
+        default=None, min_length=1, max_length=100
+    )
+
+
+class UpdateCustomConversionGoal(StrictModel):
+    kind: Literal["update_custom_conversion_goal"]
+    custom_conversion_goal: CustomGoalRef
+    patch: CustomGoalPatch
+    expected_campaigns: list[CampaignRef] = Field(max_length=1000)
+
+
+class RemoveCustomConversionGoal(StrictModel):
+    kind: Literal["remove_custom_conversion_goal"]
+    custom_conversion_goal: CustomGoalRef
+    expected_campaigns: list[CampaignRef] = Field(max_length=1000)
+
+
+class ChannelAdContent(StrictModel):
+    """完整的新文案及素材组合；图片/视频使用 create_assets 或素材库已有资源。编辑通过原子替换为暂停广告完成，旧广告 ID/统计不继承。"""
+
+    format: Literal["RESPONSIVE_DISPLAY", "DEMAND_GEN_IMAGE", "DEMAND_GEN_VIDEO", "APP"]
+    headlines: list[str] = Field(min_length=1, max_length=5)
+    descriptions: list[str] = Field(min_length=1, max_length=5)
+    business_name: str | None = Field(default=None, min_length=1, max_length=25)
+    long_headline: str | None = Field(default=None, min_length=1, max_length=90)
+    final_urls: list[str] = Field(default_factory=list, max_length=10)
+    marketing_images: list[AssetRef] = Field(default_factory=list, max_length=20)
+    square_marketing_images: list[AssetRef] = Field(default_factory=list, max_length=20)
+    portrait_marketing_images: list[AssetRef] = Field(default_factory=list, max_length=20)
+    logo_images: list[AssetRef] = Field(default_factory=list, max_length=5)
+    videos: list[AssetRef] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="after")
+    def valid(self):
+        for key, width in [
+            ("headlines", 40 if self.format == "DEMAND_GEN_IMAGE" else 30),
+            ("descriptions", 90),
+        ]:
+            values = getattr(self, key)
+            if len(set(values)) != len(values):
+                raise ValueError("文案不得重复")
+            for value in values:
+                validate_text(value, width)
+        for value, width in [(self.business_name, 25), (self.long_headline, 90)]:
+            if value is not None:
+                validate_text(value, width)
+        validate_urls(self.final_urls)
+        for key in [
+            "marketing_images",
+            "square_marketing_images",
+            "portrait_marketing_images",
+            "logo_images",
+            "videos",
+        ]:
+            if len(set(getattr(self, key))) != len(getattr(self, key)):
+                raise ValueError("同一素材类型不可重复")
+        if self.format != "APP" and (not self.business_name or not self.final_urls):
+            raise ValueError("此格式需要 business_name 和 final_urls")
+        if self.format in {"RESPONSIVE_DISPLAY", "DEMAND_GEN_IMAGE"} and (
+            not self.marketing_images or not self.square_marketing_images
+        ):
+            raise ValueError("需要横版和正方形营销图片")
+        if self.format in {"RESPONSIVE_DISPLAY", "DEMAND_GEN_VIDEO"} and not self.long_headline:
+            raise ValueError("此格式需要 long_headline")
+        if self.format.startswith("DEMAND_GEN") and not self.logo_images:
+            raise ValueError("Demand Gen 需要 Logo")
+        if self.format == "DEMAND_GEN_VIDEO" and not self.videos:
+            raise ValueError("视频广告需要已有 YouTube 视频素材")
+        if self.format == "DEMAND_GEN_IMAGE" and (self.videos or self.long_headline):
+            raise ValueError("Demand Gen 图片格式不接收 videos/long_headline")
+        if self.format == "DEMAND_GEN_VIDEO" and any(
+            [self.marketing_images, self.square_marketing_images, self.portrait_marketing_images]
+        ):
+            raise ValueError("视频格式图片仅使用 logo_images")
+        if self.format == "RESPONSIVE_DISPLAY" and (
+            self.portrait_marketing_images
+            or len(self.marketing_images) + len(self.square_marketing_images) > 15
+        ):
+            raise ValueError("Display 不接受竖版图片；营销图片合计最多 15")
+        if self.format == "APP":
+            if any([self.final_urls, self.business_name, self.long_headline, self.logo_images]):
+                raise ValueError("App 安装广告从应用商店获取网址/商家资料，不接受这些字段")
+            if len(self.descriptions) < 2:
+                raise ValueError("App 广告至少两条描述")
+        return self
+
+
+class ChannelBidding(StrictModel):
+    strategy: Literal[
+        "MANUAL_CPC",
+        "MAXIMIZE_CONVERSIONS",
+        "MAXIMIZE_CONVERSION_VALUE",
+        "TARGET_CPA",
+        "TARGET_ROAS",
+    ]
+    target_cpa: Money | None = None
+    target_roas: float | None = Field(default=None, gt=0, le=1000, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def valid(self):
+        if self.target_cpa is not None:
+            micros(self.target_cpa)
+            if self.strategy not in {"MAXIMIZE_CONVERSIONS", "TARGET_CPA"}:
+                raise ValueError("此策略不接受 target_cpa")
+        if self.target_roas is not None and self.strategy not in {
+            "MAXIMIZE_CONVERSION_VALUE",
+            "TARGET_ROAS",
+        }:
+            raise ValueError("此策略不接受 target_roas")
+        if (self.strategy == "TARGET_CPA" and self.target_cpa is None) or (
+            self.strategy == "TARGET_ROAS" and self.target_roas is None
+        ):
+            raise ValueError("目标出价策略必须提供目标")
+        return self
+
+
+class AppSettings(StrictModel):
+    """安装推广 APP_CAMPAIGN；商店 ID 创建后不可修改。不包含互动或预注册子类型。"""
+
+    app_id: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_.]+$")
+    app_store: Literal["GOOGLE_APP_STORE", "APPLE_APP_STORE"]
+    goal: Literal[
+        "OPTIMIZE_INSTALLS_TARGET_INSTALL_COST",
+        "OPTIMIZE_IN_APP_CONVERSIONS_TARGET_INSTALL_COST",
+        "OPTIMIZE_IN_APP_CONVERSIONS_TARGET_CONVERSION_COST",
+        "OPTIMIZE_RETURN_ON_ADVERTISING_SPEND",
+    ]
+    conversion_actions: list[ConversionRef] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def valid(self):
+        if self.app_store == "APPLE_APP_STORE" and not self.app_id.isdigit():
+            raise ValueError("Apple App ID 必须为数字")
+        if self.goal != "OPTIMIZE_INSTALLS_TARGET_INSTALL_COST" and not self.conversion_actions:
+            raise ValueError("应用内操作/价值优化需要 conversion_actions")
+        return self
+
+
+class ChannelGroup(StrictModel):
+    name: str = Field(min_length=1, max_length=80)
+    cpc_bid: Money | None = None
+    optimized_targeting: bool = False
+    audience: AudienceRef | None = None
+    user_lists: list[UserListRef] = Field(default_factory=list, max_length=20)
+    geo_target_ids: list[PositiveId] | None = Field(default=None, min_length=1, max_length=20)
+    language_ids: list[PositiveId] | None = Field(default=None, min_length=1, max_length=10)
+    ads: list[ChannelAdContent] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def valid(self):
+        for values in [self.geo_target_ids, self.language_ids]:
+            if values is not None and len(values) != len(set(values)):
+                raise ValueError("地区、语言不可重复")
+        return self
+
+
+class CreateChannelCampaign(StrictModel):
+    """原子创建 Display、Demand Gen 或 App 安装系列及广告组/广告，全部 PAUSED。App 商店身份不可后改；其他维护使用更新和定向动作。"""
+
+    kind: Literal["create_channel_campaign"]
+    channel: Literal["DISPLAY", "DEMAND_GEN", "APP"]
+    name: str = Field(min_length=1, max_length=80)
+    currency: Currency
+    daily_amount: Money
+    bidding: ChannelBidding
+    geo_target_ids: list[PositiveId] = Field(min_length=1, max_length=20)
+    language_ids: list[PositiveId] = Field(min_length=1, max_length=10)
+    eu_political_advertising: Literal["DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"]
+    app: AppSettings | None = None
+    ad_groups: list[ChannelGroup] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def valid(self):
+        micros(self.daily_amount)
+        if (self.channel == "APP") != (self.app is not None):
+            raise ValueError("只有 APP 且必须提供 app 设置")
+        for values in [self.geo_target_ids, self.language_ids, [g.name for g in self.ad_groups]]:
+            if len(values) != len(set(values)):
+                raise ValueError("地区、语言、广告组名称不可重复")
+        return self
+
+
+class CreateChannelAdGroup(StrictModel):
+    kind: Literal["create_channel_ad_group"]
+    campaign: CampaignRef
+    group: ChannelGroup
+
+
+class CreateChannelAd(StrictModel):
+    kind: Literal["create_channel_ad"]
+    ad_group: GroupRef
+    ad: ChannelAdContent
+
+
+class ReplaceChannelAd(StrictModel):
+    """原子移除该广告关联并创建新 PAUSED 广告；其他组的共享广告关联保留，ID 和历史统计不继承。"""
+
+    kind: Literal["replace_channel_ad"]
+    ad_group_ad: AdRef
+    ad: ChannelAdContent
+
+
+class ChannelGroupPatch(Patch):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    cpc_bid: Money | None = None
+    optimized_targeting: bool | None = None
+
+
+class UpdateChannelAdGroup(StrictModel):
+    kind: Literal["update_channel_ad_group"]
+    ad_group: GroupRef
+    patch: ChannelGroupPatch
+
+
+class SetChannelBidding(StrictModel):
+    kind: Literal["set_channel_bidding"]
+    campaign: CampaignRef
+    bidding: ChannelBidding
+    app_goal: AppSettings | None = None
+
+
+class SetChannelGroupTargeting(StrictModel):
+    """Display 使用 user_lists；Demand Gen 使用 audience，空字符串移除。Demand Gen 可按广告组设置地区/语言；省略维度保留、[] 清空。"""
+
+    kind: Literal["set_channel_group_targeting"]
+    ad_group: GroupRef
+    audience: AudienceRef | Literal[""] | None = None
+    user_lists: list[UserListRef] | None = Field(default=None, max_length=20)
+    geo_target_ids: list[PositiveId] | None = Field(default=None, max_length=20)
+    language_ids: list[PositiveId] | None = Field(default=None, max_length=10)
+
+    @model_validator(mode="after")
+    def valid(self):
+        provided = self.model_fields_set - {"kind", "ad_group"}
+        if not provided or any(getattr(self, k) is None for k in provided):
+            raise ValueError("至少设置一个维度；省略保留，不接受 null")
+        for k in provided - {"audience"}:
+            values = getattr(self, k)
+            if len(values) != len(set(values)):
+                raise ValueError("重复定向项")
+        return self
+
+
 SingleChange = Annotated[
     AddKeywords
     | AddNegatives
@@ -728,7 +1099,21 @@ SingleChange = Annotated[
     | UpdateAssetGroup
     | SetAssetGroupAssets
     | SetAssetGroupSignals
-    | SetPMaxBrandAssets,
+    | SetPMaxBrandAssets
+    | CreateConversionAction
+    | UpdateConversionAction
+    | RemoveConversionAction
+    | SetConversionGoals
+    | CreateCustomConversionGoal
+    | UpdateCustomConversionGoal
+    | RemoveCustomConversionGoal
+    | CreateChannelCampaign
+    | CreateChannelAdGroup
+    | CreateChannelAd
+    | ReplaceChannelAd
+    | UpdateChannelAdGroup
+    | SetChannelBidding
+    | SetChannelGroupTargeting,
     Field(discriminator="kind"),
 ]
 
@@ -751,7 +1136,7 @@ class PlanInput(StrictModel):
         for values in [
             keywords,
             getattr(self.change, "negative_keywords", []),
-            *[g.keywords for g in groups],
+            *[getattr(g, "keywords", []) for g in groups],
         ]:
             keys = [(k.text.casefold(), k.match_type) for k in values]
             if len(keys) != len(set(keys)):

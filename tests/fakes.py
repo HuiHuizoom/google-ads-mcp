@@ -57,6 +57,7 @@ class FakeProvider:
             "manager": False,
             "test_account": True,
             "status": "ENABLED",
+            "conversion_tracking_setting": {"google_ads_conversion_customer": ROOT},
         }
         self.records = {
             "campaign_budget": {
@@ -100,6 +101,12 @@ class FakeProvider:
             "asset_group_asset": {},
             "asset_group_signal": {},
             "audience": {},
+            "user_list": {},
+            "conversion_action": {},
+            "custom_conversion_goal": {},
+            "customer_conversion_goal": {},
+            "campaign_conversion_goal": {},
+            "conversion_goal_campaign_config": {},
         }
         self.calls = []
         self.sdk = GoogleAdsClient(
@@ -160,6 +167,7 @@ class FakeProvider:
         where = re.split(r" ORDER BY | LIMIT ", where)[0]
         conditions = re.findall(r"([a-z_.]+)\s*(!=|=)\s*'((?:\\.|[^'])*)'", where)
         in_conditions = re.findall(r"([a-z_.]+)\s+IN\s*\(([^)]+)\)", where)
+        bool_conditions = re.findall(r"([a-z_.]+)\s*=\s*(TRUE|FALSE)", where)
         result = []
         for body in self.records[resource].values():
             row = self.joined(resource, body)
@@ -170,12 +178,18 @@ class FakeProvider:
                 passed &= equal if operator == "=" else not equal
             for path, values in in_conditions:
                 passed &= str(get_path(row, path)) in re.findall(r"'([^']*)'", values)
+            for path, value in bool_conditions:
+                passed &= bool(get_path(row, path)) == (value == "TRUE")
             if passed:
                 projected = {}
                 for field in fields:
                     value = get_path(row, field.strip())
                     if value is not None:
                         put_path(projected, field.strip(), value)
+                # An unset portfolio reference must not overwrite a standard
+                # bidding message in Campaign's protobuf oneof during projection.
+                if projected.get("campaign", {}).get("bidding_strategy") == "":
+                    projected["campaign"].pop("bidding_strategy")
                 result.append(to_dict(type(self.sdk.get_type("GoogleAdsRow"))(projected)))
         return deepcopy(result)
 
@@ -225,6 +239,8 @@ class FakeProvider:
             "asset_group_asset": "assetGroupAssets",
             "asset_group_signal": "assetGroupSignals",
             "audience": "audiences",
+            "conversion_action": "conversionActions",
+            "custom_conversion_goal": "customConversionGoals",
         }
 
         def substitute(value):
@@ -254,7 +270,11 @@ class FakeProvider:
                     body.update(period="DAILY", reference_count=1)
                 if resource == "campaign":
                     body["bidding_strategy_type"] = (
-                        "MAXIMIZE_CONVERSIONS"
+                        "TARGET_CPA"
+                        if "target_cpa" in body
+                        else "TARGET_ROAS"
+                        if "target_roas" in body
+                        else "MAXIMIZE_CONVERSIONS"
                         if "maximize_conversions" in body
                         else "MAXIMIZE_CONVERSION_VALUE"
                         if "maximize_conversion_value" in body
@@ -274,8 +294,32 @@ class FakeProvider:
                 if resource == "ad_group_ad":
                     body["ad"].update(
                         resource_name=ROOT + "/ads/" + str(self.counter),
-                        type_="RESPONSIVE_SEARCH_AD",
+                        type_=next(
+                            (
+                                kind
+                                for key, kind in {
+                                    "responsive_display_ad": "RESPONSIVE_DISPLAY_AD",
+                                    "demand_gen_multi_asset_ad": "DEMAND_GEN_MULTI_ASSET_AD",
+                                    "demand_gen_video_responsive_ad": "DEMAND_GEN_VIDEO_RESPONSIVE_AD",
+                                    "app_ad": "APP_AD",
+                                }.items()
+                                if key in body["ad"]
+                            ),
+                            "RESPONSIVE_SEARCH_AD",
+                        ),
                     )
+                if resource == "ad_group_criterion":
+                    for key, kind in {
+                        "audience": "AUDIENCE",
+                        "user_list": "USER_LIST",
+                        "location": "LOCATION",
+                        "language": "LANGUAGE",
+                    }.items():
+                        if key in body:
+                            body["type_"] = kind
+                if resource == "conversion_action":
+                    body["owner_customer"] = ROOT
+                    body["origin"] = "WEBSITE"
                 if resource in {"asset", "campaign_asset", "asset_group_asset"}:
                     body["source"] = "ADVERTISER"
                 if resource == "asset":
@@ -324,6 +368,8 @@ class FakeProvider:
                             "target_spend": "TARGET_SPEND",
                             "maximize_conversions": "MAXIMIZE_CONVERSIONS",
                             "maximize_conversion_value": "MAXIMIZE_CONVERSION_VALUE",
+                            "target_cpa": "TARGET_CPA",
+                            "target_roas": "TARGET_ROAS",
                         }
                         chosen = next((k for k in body if k in strategies), None)
                         if chosen:

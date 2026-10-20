@@ -82,6 +82,15 @@ class ResourcesInput(AccountInput):
         "asset_group_assets",
         "asset_group_signals",
         "audiences",
+        "channel_campaigns",
+        "channel_ad_groups",
+        "channel_ads",
+        "ad_group_criteria",
+        "conversion_actions",
+        "customer_conversion_goals",
+        "campaign_conversion_goals",
+        "conversion_goal_configs",
+        "custom_conversion_goals",
     ]
     campaign: CampaignRef | None = None
     ad_group: GroupRef | None = None
@@ -213,6 +222,8 @@ def create_server(engine: Engine):
         return {"plan": plan, "events": engine.ledger.events(arg.operation_id)}
 
     def resources(arg):
+        from .channels import AD_FIELDS, CHANNEL_FIELDS, CHANNEL_GROUP_FIELDS, GROUP_TARGET_FIELDS
+        from .conversions import ACTION_FIELDS, CONFIG_FIELDS, CUSTOM_FIELDS
         from .maintenance import (
             ASSET_FIELDS,
             CAMPAIGN_EDIT_FIELDS,
@@ -245,18 +256,56 @@ def create_server(engine: Engine):
             "asset_group_assets": ("asset_group_asset", GROUP_LINK_FIELDS),
             "asset_group_signals": ("asset_group_signal", SIGNAL_FIELDS),
             "audiences": ("audience", AUDIENCE_FIELDS),
+            "channel_campaigns": ("campaign", CHANNEL_FIELDS),
+            "channel_ad_groups": ("ad_group", CHANNEL_GROUP_FIELDS),
+            "channel_ads": ("ad_group_ad", AD_FIELDS),
+            "ad_group_criteria": ("ad_group_criterion", GROUP_TARGET_FIELDS),
+            "conversion_actions": ("conversion_action", ACTION_FIELDS),
+            "customer_conversion_goals": (
+                "customer_conversion_goal",
+                [
+                    "customer_conversion_goal." + f
+                    for f in ["resource_name", "category", "origin", "biddable"]
+                ],
+            ),
+            "campaign_conversion_goals": (
+                "campaign_conversion_goal",
+                [
+                    "campaign_conversion_goal." + f
+                    for f in ["resource_name", "campaign", "category", "origin", "biddable"]
+                ],
+            ),
+            "conversion_goal_configs": ("conversion_goal_campaign_config", CONFIG_FIELDS),
+            "custom_conversion_goals": ("custom_conversion_goal", CUSTOM_FIELDS),
         }[arg.resource]
         conditions = (
             []
-            if arg.include_removed or resource in {"asset", "asset_group_signal"}
+            if arg.include_removed
+            or resource
+            in {
+                "asset",
+                "asset_group_signal",
+                "customer_conversion_goal",
+                "campaign_conversion_goal",
+                "conversion_goal_campaign_config",
+            }
             else [f"{resource}.status != 'REMOVED'"]
         )
         if arg.campaign:
-            if arg.resource in {"assets", "audiences", "asset_group_signals"}:
+            if arg.resource in {
+                "assets",
+                "audiences",
+                "asset_group_signals",
+                "conversion_actions",
+                "customer_conversion_goals",
+                "custom_conversion_goals",
+            }:
                 raise AdsError(
                     "INVALID_RESOURCE_FILTER", "此列表不支持 campaign 过滤；信号请使用 asset_group"
                 )
-            if arg.resource in {"asset_groups", "asset_group_assets"}:
+            if arg.resource in {"campaign_conversion_goals", "conversion_goal_configs"}:
+                conditions.append(f"{resource}.campaign = {literal(arg.campaign)}")
+            elif arg.resource in {"asset_groups", "asset_group_assets"}:
                 conditions.append(f"asset_group.campaign = {literal(arg.campaign)}")
             else:
                 conditions.append(f"campaign.resource_name = {literal(arg.campaign)}")
@@ -274,16 +323,31 @@ def create_server(engine: Engine):
                 raise AdsError("INVALID_RESOURCE_FILTER", "asset_type 仅用于素材库")
             conditions.append(f"asset.type = {literal(arg.asset_type)}")
         if arg.name_contains:
-            if arg.resource not in {"assets", "asset_groups", "audiences"}:
+            if arg.resource not in {
+                "assets",
+                "asset_groups",
+                "audiences",
+                "conversion_actions",
+                "custom_conversion_goals",
+                "channel_campaigns",
+                "channel_ad_groups",
+            }:
                 raise AdsError("INVALID_RESOURCE_FILTER", "名称搜索仅用于素材库、素材组和受众")
             term = arg.name_contains.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
             conditions.append(f"{resource}.name LIKE {literal('%' + term + '%')}")
         if arg.ad_group:
-            if arg.resource not in {"ad_groups", "ads", "keywords"}:
+            if arg.resource not in {
+                "ad_groups",
+                "ads",
+                "keywords",
+                "channel_ad_groups",
+                "channel_ads",
+                "ad_group_criteria",
+            }:
                 raise AdsError("INVALID_RESOURCE_FILTER", "ad_group 仅用于广告组、广告、关键词列表")
             conditions.append(f"ad_group.resource_name = {literal(arg.ad_group)}")
         if arg.ad_resource:
-            if arg.resource != "ads":
+            if arg.resource not in {"ads", "channel_ads"}:
                 raise AdsError("INVALID_RESOURCE_FILTER", "ad_resource 仅用于查询广告的全部关联")
             conditions.append(f"ad_group_ad.ad.resource_name = {literal(arg.ad_resource)}")
         if arg.resource == "keywords":
@@ -356,7 +420,7 @@ def create_server(engine: Engine):
         ),
         "list_resources": (
             ResourcesInput,
-            "读取系列、广告组、RSA、关键词、定位/时段/设备、系列素材，以及素材库 assets、PMax 素材组 asset_groups/关联 asset_group_assets/信号 asset_group_signals、受众 audiences。支持素材类型及名称查找；默认排除可标记为 REMOVED 的资源。超限报错，不伪装完整结果。",
+            "读取 Search/PMax 资源、素材和受众；Display/Demand Gen/App 使用 channel_campaigns/channel_ad_groups/channel_ads，组定向使用 ad_group_criteria。转化配置使用 conversion_actions/customer_conversion_goals/campaign_conversion_goals/conversion_goal_configs/custom_conversion_goals。默认排除 REMOVED，超限报错。",
             resources,
             True,
             True,

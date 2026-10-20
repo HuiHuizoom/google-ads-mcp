@@ -180,8 +180,20 @@ class Context:
             }
             and resource == "campaign"
         )
-        if channel != "SEARCH" and not (common and channel == "PERFORMANCE_MAX"):
+        extra = (
+            self.change.kind
+            in {"update_campaign", "set_targeting", "set_schedule", "remove_resource"}
+            and channel in {"DISPLAY", "DEMAND_GEN", "MULTI_CHANNEL"}
+            and (resource == "campaign" or self.change.kind == "remove_resource")
+        )
+        if channel != "SEARCH" and not (common and channel == "PERFORMANCE_MAX") and not extra:
             raise AdsError("SEARCH_REQUIRED", "此维护操作只支持 Search；PMax 使用素材组相关操作")
+        if extra:
+            from .channels import campaign as channel_campaign
+
+            _, supported = channel_campaign(self, row["campaign"]["resource_name"])
+            if supported == "APP" and self.change.kind == "set_schedule":
+                raise AdsError("APP_SCHEDULE_UNSUPPORTED", "App 系列不支持本接口的投放时段配置")
         not_removed(row, "campaign")
         return row
 
@@ -526,10 +538,10 @@ def replace_keyword(c, change):
 
 def update_campaign(c, change):
     row = c.parent(change.campaign)
-    if row["campaign"]["advertising_channel_type"] == "PERFORMANCE_MAX" and (
+    if row["campaign"]["advertising_channel_type"] != "SEARCH" and (
         {"search_partners", "display_network"} & change.patch.model_fields_set
     ):
-        raise AdsError("PMAX_NETWORK_MANAGED", "PMax 网络由 Google 管理，不能按 Search 开关网络")
+        raise AdsError("PMAX_NETWORK_MANAGED", "非 Search 系列不能使用 Search 网络开关")
     values, paths = {}, []
     mapping = {
         "search_partners": "network_settings.target_search_network",
@@ -688,7 +700,11 @@ def replace_criteria(c, campaign, condition, rows, desired, selected=lambda body
 
 
 def set_targeting(c, change):
-    c.parent(change.campaign)
+    parent = c.parent(change.campaign)
+    if parent["campaign"]["advertising_channel_type"] == "DEMAND_GEN":
+        raise AdsError(
+            "USE_GROUP_TARGETING", "Demand Gen 地区/语言请用 set_channel_group_targeting"
+        )
     data = change.patch.model_dump(exclude_none=True)
     if "geo_target_ids" in data or "excluded_geo_target_ids" in data:
         condition, rows = criterion_collection(c, change.campaign, "LOCATION")
@@ -775,15 +791,17 @@ def set_device_bid(c, change):
 
 
 def remove_resource(c, change):
+    from .channels import AD_FIELDS
+
     resource = resource_for(change.resource)
     if resource == "ad_group_ad":
-        row = c.load(resource, change.resource, RSA_FIELDS)
+        row = c.load(resource, change.resource, [*RSA_FIELDS, *AD_FIELDS])
         c.parent(row[resource]["ad_group"])
     else:
         row = c.parent(change.resource)
         children = [
             ("ad_group", GROUP_FIELDS),
-            ("ad_group_ad", RSA_FIELDS),
+            ("ad_group_ad", [*RSA_FIELDS, *AD_FIELDS]),
             ("ad_group_criterion", KEYWORD_FIELDS),
         ]
         if row["campaign"]["advertising_channel_type"] == "PERFORMANCE_MAX":
