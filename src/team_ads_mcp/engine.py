@@ -10,7 +10,7 @@ from .config import Settings
 from .errors import AdsError, safe_error
 from .ledger import Ledger
 from .models import Account, PlanInput, digest
-from .planner import compile_plan, verify
+from .planner import compile_plan, reconciliation_checks, verify
 from .provider import utc_now
 
 
@@ -134,7 +134,10 @@ class Engine:
             if plan["status"] not in {"UNKNOWN", "READBACK_MISMATCH", "IN_FLIGHT"}:
                 return plan
             account = Account.model_validate(plan["body"]["request"]["account"])
-            evidence = verify(self.provider, account, plan["body"]["prepared"]["checks"])
+            checks, corrections = reconciliation_checks(plan)
+            evidence = verify(self.provider, account, checks)
+            if corrections:
+                evidence["check_compatibility"] = corrections
             prior = plan["result"] or {}
             self.ledger.finish(
                 plan_id,

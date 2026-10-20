@@ -262,7 +262,8 @@ def compile_initial(provider, settings, request, plan_id):
         amount = micros(change.daily_amount)
         settings.limit(account, amount)
         marker = f" [tmcp-{plan_id}]"
-        campaign_name, budget_name = change.name + marker, "Budget" + marker
+        # Google keeps a non-shared budget's name in sync with its campaign.
+        campaign_name = budget_name = change.name + marker
         campaign = f"customers/{account.customer_id}/campaigns/-2"
         budget = f"customers/{account.customer_id}/campaignBudgets/-1"
         before["same_marker"] = query_rows(
@@ -398,7 +399,9 @@ def compile_initial(provider, settings, request, plan_id):
         checks.append(
             check(
                 "campaign_criterion",
-                condition + " AND campaign_criterion.status != 'REMOVED'",
+                condition
+                + " AND campaign_criterion.status != 'REMOVED'"
+                + " AND campaign_criterion.type != 'DEVICE'",
                 [
                     "campaign_criterion.location.geo_target_constant",
                     "campaign_criterion.language.language_constant",
@@ -545,6 +548,47 @@ def matches(actual, expected):
     if isinstance(expected, bool):
         return actual is expected
     return actual == expected or (isinstance(expected, int) and str(actual) == str(expected))
+
+
+def reconciliation_checks(plan):
+    """Adapt legacy Search readback expectations without changing the stored plan."""
+    checks = deepcopy(plan["body"]["prepared"]["checks"])
+    corrections = set()
+    change = plan["body"]["request"]["change"]
+    if change["kind"] != "create_search":
+        return checks, []
+    marker = f" [tmcp-{plan['id']}]"
+    campaign_name, legacy_budget_name = change["name"] + marker, "Budget" + marker
+    campaign_condition = f"campaign.name = {literal(campaign_name)}"
+    for item in checks:
+        if item["resource"] == "campaign_budget" and item["condition"] == (
+            f"campaign_budget.name = {literal(legacy_budget_name)}"
+        ):
+            expected = item["expected"]
+            if (
+                len(expected) == 1
+                and expected[0]["campaign_budget"].get("explicitly_shared") is False
+                and expected[0]["campaign_budget"].get("name") == legacy_budget_name
+            ):
+                item["condition"] = f"campaign_budget.name = {literal(campaign_name)}"
+                expected[0]["campaign_budget"]["name"] = campaign_name
+                corrections.add("legacy_nonshared_budget_name")
+        elif item["resource"] == "campaign" and item["condition"] == campaign_condition:
+            for expected in item["expected"]:
+                if (
+                    expected.get("campaign", {}).get("name") == campaign_name
+                    and expected.get("campaign_budget", {}).get("name") == legacy_budget_name
+                ):
+                    expected["campaign_budget"]["name"] = campaign_name
+                    corrections.add("legacy_nonshared_budget_name")
+        elif item["resource"] == "campaign_criterion" and item["condition"] == (
+            campaign_condition + " AND campaign_criterion.status != 'REMOVED'"
+        ):
+            # Search creation does not configure device bids. Google adds device rows
+            # which are outside the requested location/language/negative-keyword checks.
+            item["condition"] += " AND campaign_criterion.type != 'DEVICE'"
+            corrections.add("implicit_device_criteria")
+    return checks, sorted(corrections)
 
 
 def verify(provider, account, checks):

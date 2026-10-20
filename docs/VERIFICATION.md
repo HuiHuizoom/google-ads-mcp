@@ -1,5 +1,14 @@
 # 本地验收记录
 
+## 2026-10-20：Search 回读修复及真实预算修改，0.3.1
+
+- Google 会让非共享预算名称跟随广告系列名称，旧版使用独立预算名查找导致误报；现按 [官方字段定义](https://developers.google.com/google-ads/api/fields/v25/campaign_budget#campaign_budget.name) 校验。
+- Search 创建回读排除未请求配置的默认 DEVICE 行。旧账本通过只读 reconcile 应用明确的兼容规则，保留原计划及 hash。
+- `uv run pytest -q`：**95 passed**。新增覆盖 Google 默认设备与预算改名、旧计划恢复，以及真实预算金额/地域/否定词/落地页不一致时仍保留锁。
+- 真实账户验收：此前已获回执的暂停 Search 测试系列，经预算、系列、定位、广告组、关键词、RSA 六组回读全部通过，记录变为 RECONCILED；核对过程没有向 Google 发送写入。
+- 按用户明确要求，随后通过 MCP 将该系列平均日预算由 **1 USD 改为 5 USD**：preview_change 的 Google validate_only 通过，submit_change 返回 VERIFIED；另行 GAQL 回读确认 `amount_micros=5000000`、系列保持 PAUSED、预算非共享且只被一个系列引用。没有启用广告。
+- 本轮证明上述真实读取、旧操作核对和预算更新路径，不代表所有写入动作均已在真实账户验收。
+
 ## 2026-10-20：移除本机审批，0.3.0
 
 本轮按用户要求删除独立审核窗口、`team-ads approve` 命令和逐次 macOS 身份验证。流程改为 `preview_change → submit_change → 远端回读`，Google OAuth 与 OS Keychain 实现保持不变。本轮未使用真实凭据、未向 Google Ads 发送写入，也未修改现有操作账本或解除已有账户锁。
