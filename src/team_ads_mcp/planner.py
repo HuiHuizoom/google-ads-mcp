@@ -567,12 +567,28 @@ def matches(actual, expected):
 
 
 def reconciliation_checks(plan):
-    """Adapt legacy Search readback expectations without changing the stored plan."""
+    """Adapt known legacy read selectors without changing expected data or stored plans."""
     checks = deepcopy(plan["body"]["prepared"]["checks"])
     corrections = set()
     change = plan["body"]["request"]["change"]
+    if change["kind"] in {
+        "create_channel_campaign",
+        "create_channel_ad_group",
+        "create_channel_ad",
+        "replace_channel_ad",
+    }:
+        atomic = {
+            "ad_group_ad.ad.responsive_display_ad.long_headline.text",
+            "ad_group_ad.ad.demand_gen_video_responsive_ad.business_name.text",
+        }
+        for item in checks:
+            if item["resource"] == "ad_group_ad" and atomic.intersection(item["fields"]):
+                item["fields"] = [
+                    f.removesuffix(".text") if f in atomic else f for f in item["fields"]
+                ]
+                corrections.add("legacy_channel_ad_text_asset_selector")
     if change["kind"] != "create_search":
-        return checks, []
+        return checks, sorted(corrections)
     marker = f" [tmcp-{plan['id']}]"
     campaign_name, legacy_budget_name = change["name"] + marker, "Budget" + marker
     campaign_condition = f"campaign.name = {literal(campaign_name)}"

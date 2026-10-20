@@ -568,6 +568,42 @@ def test_channel_bidding_obeys_existing_budget_limit(engine):
 
 
 @pytest.mark.parametrize(
+    "channel,field",
+    [
+        ("DISPLAY", "ad_group_ad.ad.responsive_display_ad.long_headline"),
+        ("DEMAND_GEN", "ad_group_ad.ad.demand_gen_video_responsive_ad.business_name"),
+    ],
+)
+def test_ad_text_asset_readback_uses_selectable_message_and_legacy_reconcile(
+    engine, channel, field
+):
+    from team_ads_mcp.planner import reconciliation_checks, verify
+
+    fmt = "RESPONSIVE_DISPLAY" if channel == "DISPLAY" else "DEMAND_GEN_VIDEO"
+    plan = preview(engine, creation(channel, fmt))
+    check = next(c for c in plan["body"]["prepared"]["checks"] if field in c["fields"])
+    assert field + ".text" not in check["fields"]
+    # Simulate a stored 0.5.0 plan without modifying its immutable expected values.
+    legacy = deepcopy(plan)
+    original = deepcopy(legacy["body"]["prepared"]["checks"])
+    for c in legacy["body"]["prepared"]["checks"]:
+        c["fields"] = [f + ".text" if f == field else f for f in c["fields"]]
+    legacy_before = deepcopy(legacy)
+    checks, corrections = reconciliation_checks(legacy)
+    assert checks == original and legacy == legacy_before
+    assert corrections == ["legacy_channel_ad_text_asset_selector"]
+    result = engine.submit(plan["id"])
+    assert result["status"] == "VERIFIED"
+    assert verify(engine.provider, ACCOUNT, checks)["complete"]
+    # Selecting the whole message still detects changed text; it does not weaken verification.
+    ref = receipt(result, "ad_group_ad")[0]
+    ad = engine.provider.records["ad_group_ad"][ref]["ad"]
+    key = "responsive_display_ad" if channel == "DISPLAY" else "demand_gen_video_responsive_ad"
+    ad[key]["long_headline" if channel == "DISPLAY" else "business_name"]["text"] = "Changed"
+    assert not verify(engine.provider, ACCOUNT, checks)["complete"]
+
+
+@pytest.mark.parametrize(
     "case", ["wrong_channel", "wrong_asset", "app_id_change", "smart_cpc", "bad_ratio"]
 )
 def test_channel_invalid_combinations(engine, case):
@@ -618,6 +654,12 @@ def test_channel_invalid_combinations(engine, case):
             "conversion_action": ACTION,
             "expected_campaigns": [CAMPAIGN],
             "patch": {"primary_for_goal": None},
+        },
+        {
+            "kind": "update_conversion_action",
+            "conversion_action": ACTION,
+            "expected_campaigns": [CAMPAIGN],
+            "patch": {"status": "HIDDEN"},
         },
         {
             "kind": "create_custom_conversion_goal",

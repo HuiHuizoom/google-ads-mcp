@@ -61,7 +61,7 @@
 | `set_targeting` | `campaign, patch`；`geo_target_ids/excluded_geo_target_ids/language_ids`，只替换提供的维度，保留其他维度 |
 | `set_schedule` | `campaign, schedules`；替换完整一周，每项 `day, start, end`，账户时区、15 分钟粒度、每天最多 6 段、不得重叠；跨午夜拆两天 |
 | `set_device_bid` | 读取 DEVICE criterion 后传 `resource, bid_modifier`；0 排除，0.1–10 为倍数。非零调整限标准手动 CPC，避免把 Smart Bidding 不生效的系数当成已生效 |
-| `remove_resource` | 移除系列/广告组/广告关联，不能重新启用；父级移除会阻止子级投放。暂停请用 `set_status`。预算保留 |
+| `remove_resource` | 移除系列/广告组/广告关联，不能重新启用；父级移除会阻止子级投放。暂停请用 `set_status`。Google 同时移除非共享预算，共享预算保留 |
 | `set_campaign_assets` | `campaign, field_type, assets`；人工 SITELINK、CALLOUT、STRUCTURED_SNIPPET，列表是本系列该类型的完整目标集合 |
 
 ## 列表替换与清空

@@ -30,7 +30,7 @@
 | kind | 支持内容 |
 | --- | --- |
 | `create_conversion_action` | `WEBPAGE/UPLOAD_CLICKS/UPLOAD_CALLS`；名称、类别、计数、点击窗口、默认价值、主要/次要 |
-| `update_conversion_action` | 创建后修改名称、ENABLED/HIDDEN、类别、主要/次要、计数、点击/浏览窗口、默认价值 |
+| `update_conversion_action` | 创建后修改名称、ENABLED、类别、主要/次要、计数、点击/浏览窗口、默认价值 |
 | `remove_conversion_action` | 移除上述支持类型的动作；仍在自定义目标内时拒绝，需先解除引用 |
 | `set_conversion_goals` | 账户或系列已有目标的 `biddable`；系列切换 CUSTOMER/CAMPAIGN 来源、选择/解除自定义目标 |
 | `create_custom_conversion_goal` | 名称及现有转化动作列表 |
@@ -38,6 +38,8 @@
 | `remove_custom_conversion_goal` | 移除目标；尚有系列引用时拒绝，需先解除引用 |
 
 `patch` 省略字段保留现值，显式 `null` 拒绝。`value_settings` 只更新传入的子字段，价值 0 有效。动作类型和所有者不允许修改；GA4/Firebase 等导入动作可读取、选入目标，但本版不修改其动作设置。
+
+0.5.1 移除 `HIDDEN` 写入选项：真实 Google 预检对上述三种可写类型均返回 `BLOCKED_VALUE`，字段路径为 `conversion_action_operation.update.status`。Google 枚举存在这个状态不代表这些类型可设置它；停止记录使用 `remove_conversion_action`，不把 HIDDEN 当成暂停。`ENABLED` 也不代表已经收到事件。
 
 账户/系列目标由 Google 根据动作的类别、来源生成，不能通过这个接口凭空创建一组 category/origin。自定义目标可以创建。自定义目标被系列采用时，其中的动作可能参与出价，即使动作原先标为次要；预览中会提醒这一点。
 
@@ -80,6 +82,15 @@
 
 ## 验证结论
 
-动作和自定义目标的增改删、目标来源切换、范围校验、嵌套字段保留、并发变化、回执丢失恢复有离线测试。真实账户读取，以及动作创建、自定义目标创建、账户目标更新、系列恢复继承的 Google 预检已通过；没有实际提交本版转化写入，不算真实写入回读验收。账户现有动作均不属于本版支持修改的三种来源类型，因此更新/移除动作尚缺真实适用对象。
+0.5.1 已在真实账户通过专用对象完成以下提交和远端回读：
+
+- `WEBPAGE/UPLOAD_CLICKS/UPLOAD_CALLS` 三种次要动作的创建、创建后修改和移除；名称、计数、点击窗口、默认价值 0、默认价值开关与嵌套币种保留均核对通过，网站动作还修改了浏览窗口。
+- 新生成、没有既有动作的 `PHONE_CALL_LEAD/CALL_FROM_ADS` 账户目标设置 false → true → false；测试动作始终 secondary，没有改动六组原有账户默认目标。
+- 专用暂停 Display 系列的目标设置、自定义目标关联、恢复 CUSTOMER 继承并清空自定义关联。
+- 自定义目标的创建、改名、动作列表替换、被系列引用时修改、解除引用后移除。
+
+三种动作和自定义目标已移除。Google 自动生成的账户/系列目标只有更新接口，没有删除接口；新增空目标保留为不参与出价。原业务转化、默认目标及系列配置的最终比对见 [验收记录](VERIFICATION.md)。
+
+本轮没有将动作设为主要，也没有上传/模拟真实转化事件；`ENABLED` 测试是对已启用配置回写同值，不是停用后恢复的证明。其他类别、窗口组合、跨账户跟踪及真实投放/归因效果不在已验收范围。并发变化、影响集合拒绝、引用保护和回执丢失恢复另有离线测试，不能替代这些真实前置条件。
 
 官方依据：[转化配置](https://developers.google.com/google-ads/api/docs/conversions/getting-started)、[系列目标](https://developers.google.com/google-ads/api/docs/conversions/goals/campaign-goals)。

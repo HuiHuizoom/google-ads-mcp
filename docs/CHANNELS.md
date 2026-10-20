@@ -63,7 +63,7 @@
 }
 ```
 
-Demand Gen 使用 `channel: "DEMAND_GEN"`，广告格式为 `DEMAND_GEN_IMAGE` 或 `DEMAND_GEN_VIDEO`；两者均需要 Logo。图片格式不接受 `long_headline`/`videos`，视频格式需要 `long_headline`/`videos`。Google 会校验账户币种、出价策略相关的预算下限，不硬编码全球统一最低额；本次 1 USD/日被拒绝，50 USD/日的图片方案仅预检通过。
+Demand Gen 使用 `channel: "DEMAND_GEN"`，广告格式为 `DEMAND_GEN_IMAGE` 或 `DEMAND_GEN_VIDEO`；两者均需要 Logo。图片格式不接受 `long_headline`/`videos`，视频格式需要 `long_headline`/`videos`。Google 会校验账户币种、出价策略相关的预算下限，不硬编码全球统一最低额；本次 1 USD/日被拒绝，50 USD/日的图片方案已实际创建、维护并清理，始终保持暂停。
 
 Demand Gen 创建时顶层地区/语言作为各广告组的默认值，实际写入广告组级 criterion。`ad_groups[].geo_target_ids/language_ids` 可分别覆盖默认值。向已有 Demand Gen 系列新增广告组时，这两个字段必须显式提供，避免意外扩大到所有地区/语言。
 
@@ -106,6 +106,10 @@ Display 出价支持 `MANUAL_CPC/MAXIMIZE_CONVERSIONS/TARGET_CPA/TARGET_ROAS`；
 
 ## 验证结论
 
-创建后维护、App 目标变更、受众/素材检查、并发修改拒绝、回执丢失后的只读核对均有离线测试。Display 与 Demand Gen 图片创建通过真实 Google `validate_only`；尚未提交这些新增渠道的真实写入。视频和 App 还缺实际素材/App 身份，不能认定已完成真实验收。详细结果见 [验收记录](VERIFICATION.md)。
+0.5.1 已使用专用暂停对象完成 Display 和 Demand Gen 图片广告的真实创建、预算/名称/网址后缀修改、广告组维护、新增广告组和广告、广告内容替换、地域/语言与排期设置、清空、移除及远端回读。Display 另通过现有用户列表关联/清空，以及四种出价策略切换。Demand Gen 通过最大化转化和目标 CPA；目标 ROAS、最大化转化价值被 Google 以 `NOT_ENOUGH_CONVERSIONS` 拒绝，尚无实际写入通过证据。
+
+Display 首次创建已写入，但长标题的 `.text` GAQL 查询非法导致无法确认。0.5.1 改为选择完整 AdTextAsset；原操作通过只读核对恢复为 RECONCILED，没有再次创建。其余实际提交通过远端回读。清理前所有系列、组和广告均 PAUSED；本轮不测试启用投放，不把结构验收当成政策审核或曝光效果。
+
+视频和 App 按用户要求待实际素材/App 身份齐备后再测；已有 Audience 关联因账户没有 Audience 尚未实测。未逐一验证每种可选图片比例、日期、字段组合、共享预算或多账户场景。App 目标变更、受众/素材检查、并发修改拒绝和回执丢失后的只读核对有离线测试。详细结果见 [验收记录](VERIFICATION.md)。
 
 官方依据：[Display](https://developers.google.com/google-ads/api/docs/responsive-display-ads/create-responsive-display-ads)、[Demand Gen](https://developers.google.com/google-ads/api/docs/demand-gen/create-campaign)、[App](https://developers.google.com/google-ads/api/docs/app-campaigns/create-campaign)、[定向模式](https://developers.google.com/google-ads/api/docs/targeting/targeting-settings)。

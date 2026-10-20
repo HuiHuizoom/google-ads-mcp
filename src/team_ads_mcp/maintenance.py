@@ -824,7 +824,7 @@ def remove_resource(c, change):
     )
     c.summary.append({"resource": change.resource, "before": row[resource], "after": "REMOVED"})
     c.warnings.append(
-        "移除后不能重新启用；父资源被移除后其下广告无法投放。若只是暂时停用，请改用 set_status PAUSED。移除系列不自动移除预算。"
+        "移除后不能重新启用；父资源被移除后其下广告无法投放。若只是暂时停用，请改用 set_status PAUSED。Google 会同时移除系列的非共享预算；共享预算和素材库对象保留。"
     )
 
 

@@ -75,9 +75,9 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 ```
 
-自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据，目前 156 项通过。历史真实账户验收完成原有 20 种写入的 49 个计划（48 VERIFIED、1 RECONCILED），以及 PMax/素材的 23 次写入（全部 VERIFIED）。
+自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据，目前 159 项通过。历史真实账户验收完成原有 20 种写入的 49 个计划（48 VERIFIED、1 RECONCILED），以及 PMax/素材的 23 次写入（全部 VERIFIED）。
 
-0.5.0 新增能力已通过离线测试；Display、Demand Gen 图片、转化动作/自定义目标创建和账户/系列目标设置通过真实 Google 提交前预检，**尚未提交新增能力的真实写入**。App 缺真实 App 身份，视频缺可用 YouTube 素材，Audience 关联仍缺对象。关键词研究仍受 Google 访问等级限制。具体范围见 [验收记录](docs/VERIFICATION.md)，模拟与预检不作为真实写入证据。
+0.5.1 已在专用暂停对象完成 Display、Demand Gen 图片、三种转化动作及账户/系列/自定义目标的真实主路径验收和清理：**65 个写入计划，64 VERIFIED、1 RECONCILED**。修复了 Display 长标题回读，并移除 Google 拒绝的转化 HIDDEN 写入选项。Demand Gen 目标 ROAS/最大化转化价值仍因转化不足被拒；App、视频、Audience 关联尚缺实际对象，关键词研究仍受访问等级限制。具体通过项、未通过项和清理结果见 [验收记录](docs/VERIFICATION.md)，不把结构写入成功等同于真实投放或转化回传。
 
 ## 项目边界
 

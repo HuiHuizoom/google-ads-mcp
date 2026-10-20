@@ -441,7 +441,7 @@ def create_server(engine: Engine):
         ),
         "preview_change": (
             PlanInput,
-            "创建及创建后维护：Search、标准 PMax、素材组/受众信号/搜索主题、素材上传与复用、品牌素材，以及预算、出价、状态、定位等。kind 决定动作；patch 省略保留，列表替换/清空见 schema。读取 before/影响范围并执行 Google validate_only；返回供 submit_change 提交的计划，尚未写入广告。request_key 去重。",
+            "创建及创建后维护：Search、标准 PMax、Display、Demand Gen 图片/视频、App 安装推广、素材与定位，以及转化动作/账户及系列目标/自定义目标。kind 决定动作；patch 省略保留，列表替换/清空见 schema。读取 before/影响范围并执行 Google validate_only；返回供 submit_change 提交的计划，尚未写入广告。request_key 去重。",
             engine.preview,
             False,
             True,

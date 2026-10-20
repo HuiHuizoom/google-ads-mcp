@@ -1,4 +1,4 @@
-"""Strict Search, Performance Max and asset contracts (no raw mutations)."""
+"""Strict advertising, asset and conversion contracts (no raw mutations)."""
 
 from __future__ import annotations
 
@@ -455,7 +455,7 @@ class SetDeviceBid(StrictModel):
 
 
 class RemoveResource(StrictModel):
-    """不可恢复地移除 Search/PMax 系列、Search 广告组/广告关联或 PMax 素材组。临时停用请用 set_status PAUSED；父资源移除会让下级停止投放，不自动删除预算或素材库对象。"""
+    """移除已支持渠道的系列、广告组/广告关联或 PMax 素材组，不能重新启用。临时停用请用 set_status PAUSED；父资源移除会让下级停止投放。Google 同时移除系列的非共享预算；共享预算和素材库对象保留。"""
 
     kind: Literal["remove_resource"]
     resource: StatusRef
@@ -746,7 +746,9 @@ class ConversionValues(Patch):
 
 class ConversionActionPatch(Patch):
     name: str | None = Field(default=None, min_length=1, max_length=80)
-    status: Literal["ENABLED", "HIDDEN"] | None = None
+    # Google rejects HIDDEN for the three conversion types this writer supports.
+    # Disable recording through remove_conversion_action, not a hidden status.
+    status: Literal["ENABLED"] | None = None
     category: ConversionCategory | None = None
     primary_for_goal: bool | None = None
     counting_type: Literal["ONE_PER_CLICK", "MANY_PER_CLICK"] | None = None

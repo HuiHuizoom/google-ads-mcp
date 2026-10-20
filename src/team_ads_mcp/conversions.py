@@ -45,7 +45,12 @@ IMPACT_FIELDS = [
 def leaves(body, prefix=""):
     for key, value in body.items():
         path = prefix + ("type" if key == "type_" else key)
-        if isinstance(value, dict):
+        # GAQL selects these AdTextAsset messages as a whole, not their .text leaf.
+        atomic = path in {
+            "ad.responsive_display_ad.long_headline",
+            "ad.demand_gen_video_responsive_ad.business_name",
+        }
+        if isinstance(value, dict) and not atomic:
             yield from leaves(value, path + ".")
         else:
             yield path
