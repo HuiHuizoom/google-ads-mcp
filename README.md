@@ -1,6 +1,8 @@
-# Team Ads MCP
+# Clico Google Ads MCP
 
 团队自用、独立运行的 Google Ads MCP 后端。Python + 官方 Google Ads 客户端 + MCP stdio。无需 Adspirer 账户或托管后端。
+
+MCP 连接名为 `clico-google-ads`；命令行入口仍为 `team-ads` / `team-ads-mcp`。
 
 写入流程：**预览校验 → 提交 → 远端回读**。无需独立审批窗口，也不逐次要求 Touch ID / Mac 密码。Google OAuth 登录和 OS Keychain 凭据存储保留；真实账户接入与写入验收需分别核对，详见 [验收记录](docs/VERIFICATION.md)。
 

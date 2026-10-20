@@ -380,7 +380,7 @@ def create_server(engine: Engine):
         )
 
     return Server(
-        "team-ads-mcp",
+        "clico-google-ads",
         version=__version__,
         on_list_tools=list_tools,
         on_call_tool=call_tool,

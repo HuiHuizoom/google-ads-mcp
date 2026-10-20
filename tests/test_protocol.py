@@ -16,7 +16,7 @@ async def test_actual_stdio_initialize_list_and_unconfigured_call(tmp_path):
     )
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         init = await session.initialize()
-        assert init.server_info.name == "team-ads-mcp"
+        assert init.server_info.name == "clico-google-ads"
         listed = await session.list_tools()
         assert len(listed.tools) == 14
         assert not any("approve" == t.name for t in listed.tools)

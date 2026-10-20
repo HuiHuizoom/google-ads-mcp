@@ -51,7 +51,7 @@ macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring
 ```json
 {
   "mcpServers": {
-    "team-ads": {
+    "clico-google-ads": {
       "command": "/Users/huitong/Workspace/google-ads-mcp/.venv/bin/team-ads-mcp",
       "env": {
         "TEAM_ADS_STATE_DIR": "/Users/huitong/Workspace/google-ads-mcp/.state"
@@ -60,6 +60,8 @@ macOS Keychain 是当前主机默认路径；若只能提供不加密的 keyring
   }
 }
 ```
+
+Codex 的 `config.toml` 使用 `[mcp_servers.clico-google-ads]` 和 `[mcp_servers.clico-google-ads.env]`。连接名与服务显示名均为 `clico-google-ads`；可执行文件仍为 `team-ads-mcp`，既有授权和状态目录不受名称变更影响。
 
 务必固定绝对状态路径，避免 MCP 客户端与 CLI 使用不同账本/Keychain namespace。更新代码后重启 MCP 连接，已运行的 Python 服务不会自动加载新代码；不需要因此重新进行 Google OAuth 登录。
 
