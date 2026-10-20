@@ -1,8 +1,22 @@
 # 本地接入、Cloud 项目与账户权限
 
-核对日期：2026-10-12（Asia/Shanghai）。第一步建议使用 Google Ads 测试账户；真实账户写入和投放需要另行批准。
+接入流程更新：2026-10-20（0.5.2，Asia/Shanghai）。公司默认配置已内置，OAuth 仍按电脑分别完成。
 
-## 1. 用户负责的 Google 侧准备
+## 公司同事快速接入
+
+安装依赖后，公司将 Desktop OAuth 客户端 JSON 放在本机 `.state/oauth-client.json`，用户只需运行：
+
+```sh
+uv run team-ads auth login
+```
+
+在 Google 页面选择具有广告账户访问权限的账号，完成登录和授权。默认项目为 `clico-485215`，目标为 Clico 广告账户 `2563778519`，直接访问、不经 MCC，开放本地写入，单个预算资源的平均日预算参数上限为 100 USD。不需要每位同事创建 Cloud 项目、OAuth 客户端或重复填写这些 ID。
+
+这套默认值仅在状态目录没有 `config.json` 时使用；已保存的配置不会被覆盖、合并或自动开放写入。成功登录会将采用的配置保存到本机。`doctor` 显示实际配置及来源；`connection_status` 提示下一步登录或检查连接。Google 是否允许读取/修改仍取决于用户的实际授权和账户角色。
+
+客户端 JSON 是公司的应用配置，须私下分发，不包含任何同事登录后产生的令牌。公开仓库不提供该文件。登录令牌由每台电脑自行生成并存入自己的钥匙串，操作历史也不需要互相复制。缺少客户端文件时返回 `OAUTH_CLIENT_REQUIRED` 和文件路径，不会打开无效登录页。
+
+## 1. 公司管理员一次性的 Google 侧准备
 
 1. 指定自己的 Google Cloud 项目，启用 Google Ads API。不要仅凭项目名字推断归属。
 2. 在该项目的 Google Ads API Overview 检查/申请访问等级。Test 面向测试账户；生产读取也需要相应生产访问资格。API 服务启用、OAuth 应用授权和 API 访问等级是不同条件。
@@ -15,9 +29,9 @@ Cloud Console 入口：`https://console.cloud.google.com/apis/api/googleads.goog
 
 如果之后指定使用 Invoko Google Cloud/Composio：开始外部配置前先核实 Chrome 为绿色 `hey invoko` 身份，并对具体改动取得批准。本项目当前没有进行这类配置。
 
-## 2. 配置本地白名单
+## 2. 可选：覆盖默认项目或账户
 
-以下 ID/项目名是占位示例，替换后再运行；金额字符串使用账户本币。默认只读。
+使用上述公司默认值时跳过本节。需要其他项目/账户时才执行 `configure`。以下 ID/项目名是占位示例，金额字符串使用账户本币；显式执行 `configure` 而不加 `--allow-write` 时，该账户配置为只读。新安装显式配置其他账户时，不会额外保留 Clico 默认写入权限。
 
 ```sh
 uv run team-ads configure \
@@ -33,8 +47,10 @@ uv run team-ads configure \
 ## 3. 本机授权
 
 ```sh
-uv run team-ads auth login --client-file /absolute/path/to/downloaded-desktop-client.json
+uv run team-ads auth login
 ```
+
+默认读取状态目录下的 `oauth-client.json`（通常为项目 `.state/oauth-client.json`）。已有文件在其他位置时，可以使用 `uv run team-ads auth login --client-file /absolute/path/to/downloaded-desktop-client.json`；不自动搜索下载目录或猜测客户端。
 
 浏览器打开 Google 授权，loopback 只监听 `127.0.0.1` 随机端口，最多等待 180 秒。使用 PKCE S256、OAuth state 与离线访问；程序检查 JSON 所属项目及官方端点。OAuth client secret 和 refresh token 写入 OS Keychain，MCP 不提供读凭据或登录接口。项目文件不保存 token。下载的原始 JSON 仍由用户负责安全保管，不加入 Git。
 

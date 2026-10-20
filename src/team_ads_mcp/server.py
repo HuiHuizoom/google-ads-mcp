@@ -126,6 +126,12 @@ def create_server(engine: Engine):
 
     def connection(_):
         project = settings.cloud_project
+        if not project or not settings.accounts:
+            next_action = "用 team-ads configure 配置项目和账户，再运行 team-ads auth login"
+        elif settings.auth_mode == "oauth" and not settings.oauth_authorization_recorded:
+            next_action = "运行 team-ads auth login；公司客户端默认读取状态目录的 oauth-client.json，授权后调用 preflight"
+        else:
+            next_action = "调用 preflight 验证账户实际读取；Google 访问权限仍以远端结果为准"
         return {
             "local_server": "running",
             "server_name": "clico-google-ads",
@@ -140,7 +146,7 @@ def create_server(engine: Engine):
             "access_level": "unknown_manual_check_required",
             "allowed_accounts": [p.model_dump() for p in settings.accounts],
             "access_console": f"https://console.cloud.google.com/apis/api/googleads.googleapis.com/overview?project={project}",
-            "next_action": "用 team-ads configure 配置本机允许账户；auth login 后调用 preflight 验证实际读取",
+            "next_action": next_action,
             "boundaries": [
                 "OAuth scope、Cloud 项目访问等级、Ads 账户角色、MCC 路径分别控制不同权限",
                 "当前没有实现官方访问等级查询接口；读取成功不能推断具体访问等级或写入权限",

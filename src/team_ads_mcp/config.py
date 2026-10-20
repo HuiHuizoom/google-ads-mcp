@@ -12,6 +12,8 @@ from .models import Account, Money, StrictModel, digest, micros
 
 API_VERSION = "v25"
 ADS_SCOPE = "https://www.googleapis.com/auth/adwords"
+CLICO_CLOUD_PROJECT = "clico-485215"
+CLICO_CUSTOMER_ID = "2563778519"
 
 
 class AccountPolicy(StrictModel):
@@ -63,7 +65,12 @@ def state_path() -> Path:
 def load_settings(path: Path) -> Settings:
     config = path / "config.json"
     if not config.exists():
-        return Settings()
+        # Company defaults apply only to a fresh installation. Never merge them
+        # into an existing local policy (including an intentionally empty one).
+        return Settings(
+            cloud_project=CLICO_CLOUD_PROJECT,
+            accounts=[AccountPolicy(account=Account(customer_id=CLICO_CUSTOMER_ID), writes=True)],
+        )
     return Settings.model_validate_json(config.read_text())
 
 

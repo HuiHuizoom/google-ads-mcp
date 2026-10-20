@@ -44,7 +44,7 @@ class CredentialStore:
         if not raw:
             raise AdsError(
                 "AUTH_REQUIRED",
-                "运行 team-ads auth login --client-file <本机文件路径> 完成 Google 授权",
+                "运行 team-ads auth login 完成 Google 授权；公司客户端 JSON 可用 --client-file 指定",
             )
         return json.loads(raw)
 
@@ -61,6 +61,12 @@ class CredentialStore:
 
 
 def load_client_config(client_file: Path, settings: Settings) -> dict:
+    if not client_file.is_file():
+        raise AdsError(
+            "OAUTH_CLIENT_REQUIRED",
+            "请将公司 Desktop OAuth 客户端 JSON 放在指定位置，或用 auth login --client-file 指定已有文件",
+            details={"client_file": str(client_file)},
+        )
     data = json.loads(client_file.read_text())
     installed = data.get("installed")
     if not installed or installed.get("project_id") != settings.cloud_project:
@@ -73,8 +79,8 @@ def load_client_config(client_file: Path, settings: Settings) -> dict:
     return data
 
 
-def login(path: Path, settings: Settings, client_file: Path):
-    config = load_client_config(client_file, settings)
+def login(path: Path, settings: Settings, client_file: Path | None = None):
+    config = load_client_config(client_file or path / "oauth-client.json", settings)
     store = CredentialStore(path)
     store._backend()  # Fail before opening the authorization screen if storage is unavailable.
     flow = InstalledAppFlow.from_client_config(config, [ADS_SCOPE], autogenerate_code_verifier=True)

@@ -7,6 +7,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from team_ads_mcp import __version__
+from team_ads_mcp.config import CLICO_CLOUD_PROJECT, CLICO_CUSTOMER_ID
 from team_ads_mcp.engine import Engine
 from team_ads_mcp.server import create_server
 
@@ -34,6 +35,16 @@ async def test_actual_stdio_initialize_list_and_unconfigured_call(tmp_path):
         assert not status.is_error
         assert status.structured_content["live_google_connection"] == "not_checked"
         assert status.structured_content["server_name"] == init.server_info.name
+        assert status.structured_content["cloud_project_declared"] == CLICO_CLOUD_PROJECT
+        assert not status.structured_content["oauth_locally_recorded"]
+        assert status.structured_content["allowed_accounts"] == [
+            {
+                "account": {"customer_id": CLICO_CUSTOMER_ID, "login_customer_id": None},
+                "writes": True,
+                "max_daily_budget": "100",
+            }
+        ]
+        assert "configure" not in status.structured_content["next_action"]
         assert (
             status.structured_content["server_version"] == init.server_info.version == __version__
         )

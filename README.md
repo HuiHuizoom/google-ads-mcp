@@ -13,8 +13,13 @@ git clone https://github.com/HuiHuizoom/google-ads-mcp.git
 cd google-ads-mcp
 uv sync --frozen
 uv run team-ads doctor
+uv run team-ads auth login
 uv run team-ads serve
 ```
+
+0.5.2 起，新安装默认使用公司项目 `clico-485215` 和 Clico 广告账户 `2563778519`（直接访问、允许写入、每个预算资源的平均日预算参数上限 100 USD）。无需同事重复执行 `configure`。已有本地配置原样保留，包括只读或空账户列表。
+
+公司 Desktop OAuth 客户端 JSON 由公司私下提供，放在 `.state/oauth-client.json`，也可通过 `auth login --client-file /本机路径/客户端.json` 指定。公开仓库不包含此文件或任何登录凭据。每台电脑分别运行 `auth login`，在 Google 页面选择账号并授权；公司配置本身不会授予 Google 访问权限。
 
 `serve` 等待 MCP 客户端通过 stdin 发送 JSON-RPC，终端没有欢迎画面是正常的。无需凭据即可 initialize、列出工具、查看 connection_status；未授权读取会返回有恢复指引的错误。stdout 仅用于协议。
 
@@ -75,12 +80,12 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 ```
 
-自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据，目前 159 项通过。历史真实账户验收完成原有 20 种写入的 49 个计划（48 VERIFIED、1 RECONCILED），以及 PMax/素材的 23 次写入（全部 VERIFIED）。
+自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据，目前 166 项通过。新增覆盖公司默认值、保留已有只读/空白名单、显式配置其他项目、缺失客户端文件指引，以及无需 configure 的登录保存流程。历史真实账户验收完成原有 20 种写入的 49 个计划（48 VERIFIED、1 RECONCILED），以及 PMax/素材的 23 次写入（全部 VERIFIED）。
 
 0.5.1 已在专用暂停对象完成 Display、Demand Gen 图片、三种转化动作及账户/系列/自定义目标的真实主路径验收和清理：**65 个写入计划，64 VERIFIED、1 RECONCILED**。修复了 Display 长标题回读，并移除 Google 拒绝的转化 HIDDEN 写入选项。Demand Gen 目标 ROAS/最大化转化价值仍因转化不足被拒；App、视频、Audience 关联尚缺实际对象，关键词研究仍受访问等级限制。具体通过项、未通过项和清理结果见 [验收记录](docs/VERIFICATION.md)，不把结构写入成功等同于真实投放或转化回传。
 
 ## 项目边界
 
-公开仓库：[HuiHuizoom/google-ads-mcp](https://github.com/HuiHuizoom/google-ads-mcp)，默认分支为 `main`。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。克隆仓库不会包含任何账户授权，每台主机需按 [接入与权限](docs/CONNECT.md) 配置并登录。
+公开仓库：[HuiHuizoom/google-ads-mcp](https://github.com/HuiHuizoom/google-ads-mcp)，默认分支为 `main`。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。克隆仓库包含公司默认项目/账户配置，不包含 OAuth 客户端文件或账户授权；每台主机需按 [接入与权限](docs/CONNECT.md) 获取公司客户端文件并分别登录。
 
 这是一台可信主机上的团队工具，不是租户隔离服务。获准连接此 MCP 的客户端可在账户配置允许的范围内提交写入，不再有独立本机人工审批。拥有同一 OS 用户完整文件/代码权限的进程仍属于可信边界。多人远程使用需要独立服务身份、客户端身份验证和权限存储，不能直接把 stdio 包装成无认证 HTTP。

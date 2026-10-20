@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .auth import disconnect, login
-from .config import API_VERSION, AccountPolicy, load_settings, save_settings, state_path
+from .config import API_VERSION, AccountPolicy, Settings, load_settings, save_settings, state_path
 from .errors import safe_error
 from .models import Account, micros
 from .server import main as serve_main
@@ -39,7 +39,11 @@ def parser():
     auth = commands.add_parser("auth", help="授权由本机浏览器完成，凭据放 OS Keychain")
     auth_cmd = auth.add_subparsers(dest="auth_command", required=True)
     login_cmd = auth_cmd.add_parser("login", help="Desktop OAuth loopback + PKCE")
-    login_cmd.add_argument("--client-file", type=Path, required=True)
+    login_cmd.add_argument(
+        "--client-file",
+        type=Path,
+        help="公司 Desktop OAuth 客户端 JSON；默认读取状态目录下的 oauth-client.json",
+    )
     logout_cmd = auth_cmd.add_parser("logout", help="移除本地凭据，可选择撤销 Google 授权")
     logout_cmd.add_argument(
         "--revoke", action="store_true", help="同时向 Google 提交撤销（影响此 OAuth 授权）"
@@ -80,10 +84,21 @@ def main():
                 "api_version": API_VERSION,
                 "state_dir": str(path),
                 "config": settings.model_dump(),
+                "configuration_source": "local_file"
+                if (path / "config.json").exists()
+                else "clico_defaults",
                 "live_google_checked": False,
-                "next_step": "configure → auth login → MCP discover_accounts/preflight",
+                "next_step": (
+                    "auth login → MCP discover_accounts/preflight"
+                    if settings.cloud_project and settings.accounts
+                    else "configure → auth login → MCP discover_accounts/preflight"
+                ),
             }
         elif args.command == "configure":
+            if not (path / "config.json").exists():
+                # Explicit configuration starts from the generic policy; do not
+                # leave Clico write access in a different project's new config.
+                settings = Settings()
             account = Account(
                 customer_id=args.customer_id, login_customer_id=args.login_customer_id
             )

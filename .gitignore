@@ -10,5 +10,6 @@ outputs/
 .env
 .DS_Store
 *client_secret*.json
+oauth-client.json
 credentials*.json
 tokens*.json

@@ -1,5 +1,17 @@
 # 验收记录
 
+## 2026-10-20：公司默认配置与重新 OAuth，0.5.2
+
+新安装内置公司 Cloud 项目 `clico-485215`、直接访问账户 `2563778519`、允许写入及原有 100 USD 平均日预算上限；同事无需重复运行 `configure`。已有本机配置完整优先，不合并或提升原有权限。每台电脑仍需取得公司 Desktop OAuth 客户端 JSON，并分别完成 Google OAuth；客户端 JSON、授权 token 与操作账本均不进入仓库。
+
+本机先移除旧授权，再备份原配置，从没有 `config.json` 的状态验证默认值。真实 MCP stdio **0.5.2** 在授权前返回 `AUTH_REQUIRED`，没有仅凭公司默认值获得访问权。随后不传项目、账户或 `--client-file` 发起 `auth login`，使用 `.state/oauth-client.json`，在 **Clico · tryclico.com** 的 Chrome 配置文件中完成 Google 授权，凭据保存到 macOS 钥匙串。
+
+北京时间 **21:45** 的新进程回读通过：`Clico_GoogleAds / 2563778519`，币种 USD、时区 Asia/Hong_Kong、真实非 MCC 账户；账户发现也成功。发现其他账户不自动扩大允许列表。本轮只验证重新授权及真实读取，没有提交广告写入；写入能力的既有真实证据见下方 0.5.1 记录。
+
+本地 **166 passed**，ruff/格式检查、真实 stdio smoke（0.5.2、15 工具）及 sdist/wheel 构建通过。新增回归覆盖默认配置、已有空/只读配置保留、显式切换其他项目时不继承 Clico 权限、默认客户端路径、缺少客户端时的恢复提示、OAuth 保存及 MCP 首次连接提示。私有前后证据位于 `.state/onboarding-v052-before.json` 与 `.state/onboarding-v052-after.json`，不进入公开仓库。
+
+此处版本验证针对独立新启动的 MCP 进程，不代表当前聊天已经加载新版工具定义。没有重启 Codex，也没有改变 Google 账户密码、通行密钥或 Chrome 同步设置。
+
 ## 2026-10-20：Display、Demand Gen 图片及转化配置真实验收，0.5.1
 
 按用户授权，在真实账户创建前缀为 `Clico_QA050_20261020` 的专用对象，完成 **65 个实际写入计划：64 VERIFIED、1 RECONCILED**，均经真实 MCP stdio 的预览、Google 预检、提交和远端回读。14 种新增动作各有实际主路径通过；这不等于每个渠道、字段组合或出价策略都已验证。所有测试系列、广告组和广告从创建到移除始终暂停，未启用投放；App 和视频按要求留待素材齐备再测。
