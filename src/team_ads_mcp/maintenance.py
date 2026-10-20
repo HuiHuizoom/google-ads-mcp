@@ -76,6 +76,7 @@ TARGET_FIELDS = [
     ],
 ]
 ASSET_FIELDS = [
+    "campaign.resource_name",
     "campaign_asset.resource_name",
     "campaign_asset.campaign",
     "campaign_asset.asset",
@@ -162,6 +163,9 @@ class Context:
             else [*GROUP_FIELDS, "ad_group.type", *BIDDING_FIELDS]
         )
         row = self.load(resource, name, fields)
+        if resource == "ad_group":
+            parent = self.parent(row["ad_group"]["campaign"])
+            row.update(campaign=parent["campaign"], campaign_budget=parent["campaign_budget"])
         if row["campaign"]["advertising_channel_type"] != "SEARCH":
             raise AdsError("SEARCH_REQUIRED", "这些维护操作只支持 Search 广告系列")
         not_removed(row, "campaign")

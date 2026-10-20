@@ -118,6 +118,24 @@ def test_arbitrary_error_no_secret_leak():
     assert "SECRET" not in json.dumps(result)
 
 
+def test_field_metadata_uses_valid_separate_queries_and_literal_underscores(tmp_path, monkeypatch):
+    provider = GoogleProvider(tmp_path, settings())
+    sdk = FakeProvider().sdk
+    service = Mock()
+    service.search_google_ads_fields.side_effect = [
+        [type(sdk.get_type("GoogleAdsField"))(name="ad_group", selectable=True)],
+        [type(sdk.get_type("GoogleAdsField"))(name="ad_group.name", selectable=True)],
+    ]
+    client = Mock()
+    client.get_service.return_value = service
+    monkeypatch.setattr(provider, "client", lambda: client)
+    assert [r["name"] for r in provider.fields("ad_group")] == ["ad_group", "ad_group.name"]
+    queries = [c.kwargs["query"] for c in service.search_google_ads_fields.call_args_list]
+    assert queries[0].endswith("WHERE name = 'ad_group'")
+    assert queries[1].endswith("WHERE name LIKE 'ad[_]group.%'")
+    assert all(" OR " not in query and " FROM " not in query for query in queries)
+
+
 def test_revocation_unknown_keeps_credentials(tmp_path, monkeypatch):
     monkeypatch.setattr(
         auth.CredentialStore, "read", lambda _: {"credentials": {"refresh_token": "fake"}}

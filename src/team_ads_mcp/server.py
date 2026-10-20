@@ -92,6 +92,8 @@ def create_server(engine: Engine):
         project = settings.cloud_project
         return {
             "local_server": "running",
+            "server_name": "clico-google-ads",
+            "server_version": __version__,
             "api_version": API_VERSION,
             "transport": "stdio",
             "auth_mode": settings.auth_mode,
@@ -154,7 +156,10 @@ def create_server(engine: Engine):
             resource = "search_term_view"
             fields += ", ad_group.id, search_term_view.search_term"
         query = f"SELECT {fields}, {metrics} FROM {resource} WHERE segments.date BETWEEN {literal(str(arg.dates.start))} AND {literal(str(arg.dates.end))}"
-        rows = provider.search(arg.account, query, 10000)
+        selected_fields = f"{fields}, {metrics}".split(", ")
+        rows = [
+            project_row(row, selected_fields) for row in provider.search(arg.account, query, 10000)
+        ]
         return envelope(
             {
                 "rows": rows,

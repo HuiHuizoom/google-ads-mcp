@@ -95,19 +95,23 @@ class GoogleProvider:
         if not name or not all(c.isalnum() or c in "_." for c in name):
             raise AdsError("INVALID_FIELD", "请输入资源或字段名")
         try:
-            query = (
-                "SELECT name, category, data_type, selectable, filterable, sortable, "
-                "selectable_with, attribute_resources, metrics, segments "
-                f"WHERE name = {literal(name)} OR name LIKE {literal(name + '.%')} LIMIT 500"
-            )
-            result = (
-                self.client()
-                .get_service("GoogleAdsFieldService")
-                .search_google_ads_fields(
+            service = self.client().get_service("GoogleAdsFieldService")
+            # GAQL supports AND, but not OR. Escape '_' in the prefix LIKE pattern.
+            prefix = name.replace("_", "[_]") + ".%"
+            rows = []
+            for condition in [f"name = {literal(name)}", f"name LIKE {literal(prefix)}"]:
+                query = (
+                    "SELECT name, category, data_type, selectable, filterable, sortable, "
+                    f"selectable_with, attribute_resources, metrics, segments WHERE {condition}"
+                )
+                result = service.search_google_ads_fields(
                     query=query, retry=None, timeout=self.settings.timeout_seconds
                 )
-            )
-            return [to_dict(row) for row in result]
+                for row in result:
+                    if len(rows) >= 500:
+                        raise AdsError("RESULT_LIMIT", "字段超过限制，请指定更具体的字段名")
+                    rows.append(to_dict(row))
+            return rows
         except Exception as exc:
             raise safe_error(exc) from None
 

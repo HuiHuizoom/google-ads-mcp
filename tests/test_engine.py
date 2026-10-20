@@ -249,7 +249,10 @@ def test_readback_mismatch_keeps_lock(engine, monkeypatch):
         return result
 
     monkeypatch.setattr(engine.provider, "mutate", mutate)
-    assert engine.submit(plan["id"])["status"] == "READBACK_MISMATCH"
+    result = engine.submit(plan["id"])
+    assert result["status"] == "READBACK_MISMATCH"
+    assert result["result"]["readback"]["complete"] is False
+    assert "尚未匹配计划" in result["result"]["readback"]["meaning"]
 
 
 def test_validation_failure_never_creates_plan(engine):

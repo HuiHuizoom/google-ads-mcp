@@ -137,6 +137,13 @@ class FakeProvider:
         if resource not in self.records:
             return []
         fields = query.split("SELECT ", 1)[1].split(" FROM ")[0].split(",")
+        selected = {field.strip() for field in fields}
+        if resource in {"ad_group", "ad_group_ad"}:
+            assert not any(field.startswith("campaign_budget.") for field in selected), (
+                "Google does not allow budget joins from ad group resources"
+            )
+        if resource == "campaign_asset" and "campaign.resource_name" in query.split(" WHERE ")[-1]:
+            assert "campaign.resource_name" in selected, "Google requires the filter field"
         where = query.split(" WHERE ", 1)[1] if " WHERE " in query else ""
         where = re.split(r" ORDER BY | LIMIT ", where)[0]
         conditions = re.findall(r"([a-z_.]+)\s*(!=|=)\s*'((?:\\.|[^'])*)'", where)

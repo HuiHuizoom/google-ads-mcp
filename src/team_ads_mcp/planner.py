@@ -33,7 +33,7 @@ GROUP_FIELDS = [
     "ad_group.status",
     "ad_group.cpc_bid_micros",
     "ad_group.campaign",
-    *CAMPAIGN_FIELDS,
+    *(field for field in CAMPAIGN_FIELDS if not field.startswith("campaign_budget.")),
 ]
 BUDGET_FIELDS = [
     "campaign_budget.resource_name",
@@ -91,6 +91,13 @@ def compile_initial(provider, settings, request, plan_id):
     def get(resource, fields, name):
         row = one(provider, account, resource, fields, name)
         not_removed(row, resource)
+        if resource in {"ad_group", "ad_group_ad"}:
+            # Budgets cannot be joined from ad_group/ad_group_ad in GAQL.
+            parent = one(
+                provider, account, "campaign", CAMPAIGN_FIELDS, row["campaign"]["resource_name"]
+            )
+            not_removed(parent, "campaign")
+            row.update(parent)
         return row
 
     if isinstance(change, SetBudget):
@@ -622,5 +629,9 @@ def verify(provider, account, checks):
     return {
         "complete": complete,
         "evidence": evidence,
-        "meaning": "当前远端结构匹配计划；不证明审核、曝光、转化或写入归因",
+        "meaning": (
+            "当前远端结构匹配计划；不证明审核、曝光、转化或写入归因"
+            if complete
+            else "当前远端结构尚未匹配计划；保持锁定并继续核对，不能当作成功"
+        ),
     }
