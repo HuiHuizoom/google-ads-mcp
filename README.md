@@ -7,7 +7,8 @@
 ## 启动
 
 ```sh
-cd /Users/huitong/Workspace/google-ads-mcp
+git clone https://github.com/HuiHuizoom/google-ads-mcp.git
+cd google-ads-mcp
 uv sync --frozen
 uv run team-ads doctor
 uv run team-ads serve
@@ -63,6 +64,6 @@ uv run ruff format --check src tests
 
 ## 项目边界
 
-本目录是独立 Git 仓库，没有远程仓库。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。不修改 Codex 全局 MCP 配置、不部署、不改 Google Cloud、不触及 Invoko。
+公开仓库：[HuiHuizoom/google-ads-mcp](https://github.com/HuiHuizoom/google-ads-mcp)，默认分支为 `main`。凭据默认存 OS Keychain，状态及审计账本在忽略的 `.state/`，不写入源码和聊天。克隆仓库不会包含任何账户授权，每台主机需按 [接入与权限](docs/CONNECT.md) 配置并登录。
 
 这是一台可信主机上的团队工具，不是租户隔离服务。获准连接此 MCP 的客户端可在账户配置允许的范围内提交写入，不再有独立本机人工审批。拥有同一 OS 用户完整文件/代码权限的进程仍属于可信边界。多人远程使用需要独立服务身份、客户端身份验证和权限存储，不能直接把 stdio 包装成无认证 HTTP。

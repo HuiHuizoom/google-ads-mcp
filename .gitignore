@@ -8,6 +8,7 @@ work/
 outputs/
 *.db*
 .env
+.DS_Store
 *client_secret*.json
 credentials*.json
 tokens*.json
