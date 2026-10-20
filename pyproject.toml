@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "team-ads-mcp"
-version = "0.3.4"
+version = "0.4.0"
 description = "Independent local Google Ads MCP with validated change plans"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
   "mcp==2.3.0",
   "pydantic>=2.12,<3",
   "keyring>=25,<26",
+  "pillow>=11,<13",
 ]
 
 [dependency-groups]

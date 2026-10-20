@@ -1,4 +1,4 @@
-"""Post-creation Search maintenance, compiled into the existing guarded atomic plan."""
+"""Search maintenance and shared campaign edits, compiled into atomic plans."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ CAMPAIGN_EDIT_FIELDS = [
     "campaign.start_date_time",
     "campaign.end_date_time",
     "campaign.final_url_suffix",
+    "campaign.asset_automation_settings",
     "campaign.network_settings.target_google_search",
     "campaign.network_settings.target_search_network",
     "campaign.network_settings.target_content_network",
@@ -166,8 +167,21 @@ class Context:
         if resource == "ad_group":
             parent = self.parent(row["ad_group"]["campaign"])
             row.update(campaign=parent["campaign"], campaign_budget=parent["campaign_budget"])
-        if row["campaign"]["advertising_channel_type"] != "SEARCH":
-            raise AdsError("SEARCH_REQUIRED", "这些维护操作只支持 Search 广告系列")
+        channel = row["campaign"]["advertising_channel_type"]
+        common = (
+            self.change.kind
+            in {
+                "update_campaign",
+                "set_bidding",
+                "set_targeting",
+                "set_schedule",
+                "remove_resource",
+                "set_campaign_assets",
+            }
+            and resource == "campaign"
+        )
+        if channel != "SEARCH" and not (common and channel == "PERFORMANCE_MAX"):
+            raise AdsError("SEARCH_REQUIRED", "此维护操作只支持 Search；PMax 使用素材组相关操作")
         not_removed(row, "campaign")
         return row
 
@@ -512,6 +526,10 @@ def replace_keyword(c, change):
 
 def update_campaign(c, change):
     row = c.parent(change.campaign)
+    if row["campaign"]["advertising_channel_type"] == "PERFORMANCE_MAX" and (
+        {"search_partners", "display_network"} & change.patch.model_fields_set
+    ):
+        raise AdsError("PMAX_NETWORK_MANAGED", "PMax 网络由 Google 管理，不能按 Search 开关网络")
     values, paths = {}, []
     mapping = {
         "search_partners": "network_settings.target_search_network",
@@ -520,6 +538,24 @@ def update_campaign(c, change):
         "negative_geo_target_type": "geo_target_type_setting.negative_geo_target_type",
     }
     for key, value in change.patch.model_dump(exclude_none=True).items():
+        if key == "final_url_expansion":
+            if row["campaign"]["advertising_channel_type"] != "PERFORMANCE_MAX":
+                raise AdsError("PMAX_REQUIRED", "最终网址扩展开关仅用于 PMax")
+            automation_type = "FINAL_URL_EXPANSION_TEXT_ASSET_AUTOMATION"
+            settings = [
+                deepcopy(item)
+                for item in row["campaign"].get("asset_automation_settings", [])
+                if item.get("asset_automation_type") != automation_type
+            ]
+            settings.append(
+                {
+                    "asset_automation_type": automation_type,
+                    "asset_automation_status": "OPTED_IN" if value else "OPTED_OUT",
+                }
+            )
+            values["asset_automation_settings"] = settings
+            paths.append("asset_automation_settings")
+            continue
         path = mapping.get(key, key)
         set_path(values, path, value)
         paths.append(path)
@@ -545,6 +581,11 @@ def update_campaign(c, change):
 
 def set_bidding(c, change):
     row = c.parent(change.campaign)
+    if row["campaign"]["advertising_channel_type"] == "PERFORMANCE_MAX" and change.strategy not in {
+        "MAXIMIZE_CONVERSIONS",
+        "MAXIMIZE_CONVERSION_VALUE",
+    }:
+        raise AdsError("PMAX_BIDDING_REQUIRED", "PMax 只支持最大化转化或最大化转化价值")
     c.settings.limit(c.account, int(row["campaign_budget"]["amount_micros"]))
     field, values, paths = {
         "MANUAL_CPC": ("manual_cpc", {"enhanced_cpc_enabled": False}, ["enhanced_cpc_enabled"]),
@@ -740,11 +781,16 @@ def remove_resource(c, change):
         c.parent(row[resource]["ad_group"])
     else:
         row = c.parent(change.resource)
-        for child, fields in [
+        children = [
             ("ad_group", GROUP_FIELDS),
             ("ad_group_ad", RSA_FIELDS),
             ("ad_group_criterion", KEYWORD_FIELDS),
-        ]:
+        ]
+        if row["campaign"]["advertising_channel_type"] == "PERFORMANCE_MAX":
+            from .pmax import ASSET_GROUP_FIELDS
+
+            children = [("asset_group", ASSET_GROUP_FIELDS)]
+        for child, fields in children:
             if resource == "ad_group" and child == "ad_group":
                 continue
             condition = f"{resource}.resource_name = {literal(change.resource)} AND {child}.status != 'REMOVED'"

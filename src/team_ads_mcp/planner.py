@@ -68,8 +68,11 @@ def not_removed(row, resource):
 
 def compile_plan(provider, settings, request, plan_id):
     from .maintenance import compile_maintenance
+    from .pmax import compile_pmax
 
-    prepared = compile_maintenance(provider, settings, request, plan_id)
+    prepared = compile_pmax(provider, settings, request, plan_id)
+    if prepared is None:
+        prepared = compile_maintenance(provider, settings, request, plan_id)
     if prepared is None:
         prepared = compile_initial(provider, settings, request, plan_id)
     if len(prepared["operations"]) > 500:
@@ -598,11 +601,38 @@ def reconciliation_checks(plan):
     return checks, sorted(corrections)
 
 
-def verify(provider, account, checks):
+def verify(provider, account, checks, receipt=None):
     evidence, complete = [], True
     for item in checks:
-        rows = query_rows(provider, account, item["resource"], item["fields"], item["condition"])
+        condition = item["condition"]
+        if "receipt_operation_index" in item:
+            responses = (receipt or {}).get("mutate_operation_responses", [])
+            index = item["receipt_operation_index"]
+            result = responses[index] if index < len(responses) else {}
+            name = result.get(item["resource"] + "_result", {}).get("resource_name")
+            if not name or not name.startswith(f"customers/{account.customer_id}/assets/"):
+                complete = False
+                evidence.append(
+                    {
+                        "resource": item["resource"],
+                        "matches_expected": False,
+                        "observed": [],
+                        "reason": "RECEIPT_REQUIRED: Google may deduplicate; names/dimensions cannot prove asset identity",
+                    }
+                )
+                continue
+            condition = f"{item['resource']}.resource_name = {literal(name)}"
+        rows = query_rows(provider, account, item["resource"], item["fields"], condition)
         compared = deepcopy(rows)
+        if item.get("selected_automation_types"):
+            selected = set(item["selected_automation_types"])
+            for row in compared:
+                campaign = row.get("campaign", {})
+                campaign["asset_automation_settings"] = [
+                    setting
+                    for setting in campaign.get("asset_automation_settings", [])
+                    if setting.get("asset_automation_type") in selected
+                ]
         # Selected optional protobuf scalars may be absent after a field-mask clear.
         # Only explicitly declared clear paths are normalized; all other missing data fails.
         defaults = dict(item.get("default_values", {}))

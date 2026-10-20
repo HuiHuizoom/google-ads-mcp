@@ -96,6 +96,10 @@ class FakeProvider:
             "asset": {},
             "campaign_asset": {},
             "ad_group_criterion_label": {},
+            "asset_group": {},
+            "asset_group_asset": {},
+            "asset_group_signal": {},
+            "audience": {},
         }
         self.calls = []
         self.sdk = GoogleAdsClient(
@@ -115,6 +119,14 @@ class FakeProvider:
 
     def joined(self, resource, body):
         row = {resource: deepcopy(body)}
+        if resource in {"asset_group_asset", "asset_group_signal"}:
+            row["asset_group"] = deepcopy(self.records["asset_group"][body["asset_group"]])
+        if resource == "asset_group":
+            row["campaign"] = deepcopy(self.records["campaign"][body["campaign"]])
+        if "asset_group" in row:
+            row["campaign"] = deepcopy(self.records["campaign"][row["asset_group"]["campaign"]])
+        if resource == "asset_group_asset":
+            row["asset"] = deepcopy(self.records["asset"][body["asset"]])
         if resource in {"ad_group_ad", "ad_group_criterion"}:
             row["ad_group"] = deepcopy(self.records["ad_group"][body["ad_group"]])
         if resource in {"campaign_criterion", "campaign_asset"}:
@@ -147,6 +159,7 @@ class FakeProvider:
         where = query.split(" WHERE ", 1)[1] if " WHERE " in query else ""
         where = re.split(r" ORDER BY | LIMIT ", where)[0]
         conditions = re.findall(r"([a-z_.]+)\s*(!=|=)\s*'((?:\\.|[^'])*)'", where)
+        in_conditions = re.findall(r"([a-z_.]+)\s+IN\s*\(([^)]+)\)", where)
         result = []
         for body in self.records[resource].values():
             row = self.joined(resource, body)
@@ -155,6 +168,8 @@ class FakeProvider:
                 expected = expected.replace("\\'", "'").replace("\\\\", "\\")
                 equal = str(get_path(row, path)) == expected
                 passed &= equal if operator == "=" else not equal
+            for path, values in in_conditions:
+                passed &= str(get_path(row, path)) in re.findall(r"'([^']*)'", values)
             if passed:
                 projected = {}
                 for field in fields:
@@ -206,6 +221,10 @@ class FakeProvider:
             "asset": "assets",
             "campaign_asset": "campaignAssets",
             "ad_group_criterion_label": "adGroupCriterionLabels",
+            "asset_group": "assetGroups",
+            "asset_group_asset": "assetGroupAssets",
+            "asset_group_signal": "assetGroupSignals",
+            "audience": "audiences",
         }
 
         def substitute(value):
@@ -229,12 +248,18 @@ class FakeProvider:
                 if "resource_name" in body:
                     mapping[body["resource_name"]] = name
                 body["resource_name"] = name
-                if resource not in {"asset", "ad_group_criterion_label"}:
+                if resource not in {"asset", "ad_group_criterion_label", "asset_group_signal"}:
                     body.setdefault("status", "ENABLED")
                 if resource == "campaign_budget":
                     body.update(period="DAILY", reference_count=1)
                 if resource == "campaign":
-                    body["bidding_strategy_type"] = "MANUAL_CPC"
+                    body["bidding_strategy_type"] = (
+                        "MAXIMIZE_CONVERSIONS"
+                        if "maximize_conversions" in body
+                        else "MAXIMIZE_CONVERSION_VALUE"
+                        if "maximize_conversion_value" in body
+                        else "MANUAL_CPC"
+                    )
                 if resource.endswith("criterion") and "keyword" in body:
                     body["type_"] = "KEYWORD"
                 if resource == "campaign_criterion":
@@ -251,12 +276,25 @@ class FakeProvider:
                         resource_name=ROOT + "/ads/" + str(self.counter),
                         type_="RESPONSIVE_SEARCH_AD",
                     )
-                if resource in {"asset", "campaign_asset"}:
+                if resource in {"asset", "campaign_asset", "asset_group_asset"}:
                     body["source"] = "ADVERTISER"
                 if resource == "asset":
                     body["type_"] = next(
                         k.removesuffix("_asset").upper() for k in body if k.endswith("_asset")
                     )
+                    if "image_asset" in body and "data" in body["image_asset"]:
+                        import base64
+                        import io
+
+                        from PIL import Image
+
+                        data = base64.b64decode(body["image_asset"]["data"])
+                        with Image.open(io.BytesIO(data)) as image:
+                            width, height = image.size
+                        body["image_asset"] = {
+                            "file_size": len(data),
+                            "full_size": {"width_pixels": width, "height_pixels": height},
+                        }
                 if resource == "ad_group_criterion_label":
                     criterion = self.records["ad_group_criterion"][body["ad_group_criterion"]]
                     criterion.setdefault("labels", []).append(body["label"])
@@ -295,11 +333,14 @@ class FakeProvider:
                                 target.pop(other, None)
             else:
                 name = value["remove"]
-                self.records[resource][name]["status"] = "REMOVED"
-            names.append(name)
+                if resource == "asset_group_signal":
+                    del self.records[resource][name]
+                else:
+                    self.records[resource][name]["status"] = "REMOVED"
+            names.append({resource + "_result": {"resource_name": name}})
         if self.failure:
             raise self.failure
-        return {"mutate_operation_responses": [{"resource_name": name} for name in names]}
+        return {"mutate_operation_responses": names}
 
 
 def search_input(key="new-search-001"):

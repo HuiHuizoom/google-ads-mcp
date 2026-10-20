@@ -23,11 +23,11 @@ async def test_actual_stdio_initialize_list_and_unconfigured_call(tmp_path):
         init = await session.initialize()
         assert init.server_info.name == "clico-google-ads"
         listed = await session.list_tools()
-        assert len(listed.tools) == 14
+        assert len(listed.tools) == 15
         assert not any("approve" == t.name for t in listed.tools)
         preview_schema = next(t.input_schema for t in listed.tools if t.name == "preview_change")
         kinds = preview_schema["properties"]["change"]["discriminator"]["mapping"]
-        assert len(kinds) == 20 and "update_ad" in kinds and "set_targeting" in kinds
+        assert len(kinds) == 27 and "create_pmax" in kinds and "set_asset_group_signals" in kinds
         assert "省略字段保留原值" in preview_schema["$defs"]["RSAPatch"]["description"]
         status = await session.call_tool("connection_status", {})
         assert not status.is_error
@@ -52,7 +52,7 @@ async def test_full_protocol_preview_submit_readback(tmp_path):
         init = await session.initialize()
         assert "preview_change → submit_change → 远端回读" in init.instructions
         listed = await session.list_tools()
-        assert len(listed.tools) == 14
+        assert len(listed.tools) == 15
         preflight = await session.call_tool("preflight", {"account": ACCOUNT.model_dump()})
         assert preflight.structured_content["provenance"]["source"] == "offline_test_simulator"
         assert preflight.structured_content["provenance"]["account_time_zone"] == "America/New_York"

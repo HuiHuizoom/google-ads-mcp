@@ -30,7 +30,8 @@ uv run team-ads serve
 | `account_hierarchy` | MCC 层级、manager、status、币种/时区 |
 | `field_metadata` | GAQL 字段和兼容性查询 |
 | `run_gaql` | 只读、有行数上限的 GAQL |
-| `list_resources` | 读取可维护资源的当前设置、完整 ID；支持按系列、广告组和共享广告过滤 |
+| `list_resources` | 当前设置和资源 ID；包含素材库、PMax 素材组及信号，支持适用的父级/类型/名称过滤 |
+| `inspect_image_asset` | 本机图片格式、尺寸、大小、SHA-256；上传前检查，不裁剪 |
 | `performance_report` | 明确日期的 Campaign / 搜索词报表 |
 | `keyword_ideas` | 地域、语言、种子关键词研究 |
 | `preview_change` | before/after、SDK 校验、Google validate_only、持久化计划 |
@@ -38,7 +39,7 @@ uv run team-ads serve
 | `submit_change` | 提交已预览校验且仍有效的计划并回读 |
 | `reconcile_operation` | 核对不明结果；不重新写入 |
 
-现在有 **14 个 MCP 工具、20 种受控写入动作**，包括创建后的维护：
+现在有 **15 个 MCP 工具、27 种受控写入动作**，包括创建后的维护：
 
 | 对象 | 可执行的操作 |
 | --- | --- |
@@ -49,8 +50,14 @@ uv run team-ads serve
 | 关键词/否定词 | 添加、移除、替换文字/匹配方式；正向关键词可暂停/启用、修改/清除单独 CPC 和网址；否定词支持系列及广告组级 |
 | 定位与排期 | 创建后调整包含/排除地区、语言、整周投放时段；调整现有设备系数或排除设备 |
 | 系列素材 | 附加链接、宣传信息、结构化摘要的添加、内容替换及关联移除 |
+| 标准非零售 PMax | 创建暂停系列及素材组；修改预算、名称、日期、定位、排期、智能出价目标、最终网址扩展；暂停/启用/移除 |
+| PMax 素材组 | 创建后修改名称、落地页、显示路径；查询、添加、替换、移除已有素材关联；修改商家名和 Logo 关联 |
+| PMax 信号 | 已有 Audience 受众信号、搜索主题的查询、添加、替换、移除 |
+| 素材库 | 文本创建、本机图片上传、已有 YouTube 视频 ID 注册；查询并复用已有素材 |
 
 完整 Search 创建仍默认 Manual CPC、仅 Google Search、PRESENCE 定位，最多 5 个广告组；创建后可通过上述接口修改。新系列、广告组和 RSA 固定 PAUSED，每个计划最多 500 个操作。已有资源不要求由本 MCP 创建。具体输入、列表替换/清空语义、Google 不可修改字段的替换方式，见 [创建后维护](docs/MAINTENANCE.md)。
+
+PMax 新系列和素材组也固定 PAUSED；素材上传不自动关联投放。PMax 输入、品牌指南、最低素材组合与创建后修改，见 [PMax 与素材管理](docs/PMAX.md)。本版不创建 Audience 定义、不上传 MP4 至 YouTube、不做图片裁剪，也不管理 Merchant Center 商品源或旅游/本地服务变体。
 
 读取结果注明数据源、API 版本、获取时间、账户时区、币种和日期口径。未知的数据截止时间为 null；空结果不解释成零；转化配置存在不证明事件回传成功。
 
@@ -62,7 +69,7 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 ```
 
-自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据。另经用户授权在真实账户完成 20 种写入动作的主路径验收：49 个计划中 48 VERIFIED、1 RECONCILED，测试资源已清理。关键词研究仍受 Google 访问等级限制，特殊场景和连接稳定性的边界见 [验收记录](docs/VERIFICATION.md)；模拟结果不作为真实账户证据。
+自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据，目前 128 项通过。真实账户已完成原有 20 种写入的 49 个计划（48 VERIFIED、1 RECONCILED），以及 PMax/素材的 23 次写入（全部 VERIFIED），专用测试系列已移除。Audience 信号和 YouTube 视频尚缺真实素材进行实测；关键词研究仍受 Google 访问等级限制。具体范围见 [验收记录](docs/VERIFICATION.md)，模拟结果不作为真实账户证据。
 
 ## 项目边界
 

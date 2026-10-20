@@ -26,7 +26,7 @@ OS Keychain、代码和本机私有状态目录属于同一个可信 OS 用户�
 
 ## Google 边界
 
-每个计划一次 `GoogleAdsService.Mutate`，`partial_failure=false`，关闭 SDK 自动重试。需要关联新资源时使用唯一负临时 ID，依赖对象排在引用者之前。新 Campaign、AdGroup、RSA 固定 PAUSED；整套 Search 创建的新关键词可以 ENABLED，但新父级都暂停。向已有启用广告组添加关键词或修改现有资源可能立即影响投放。
+每个计划一次 `GoogleAdsService.Mutate`，`partial_failure=false`，关闭 SDK 自动重试。需要关联新资源时使用唯一负临时 ID，依赖对象排在引用者之前。新 Campaign、AdGroup、RSA、PMax AssetGroup 固定 PAUSED；整套 Search 创建的新关键词可以 ENABLED，但新父级都暂停。向已有启用资源添加关键词/素材或修改配置可能立即影响投放。
 
 预算使用 Decimal 转正整数 micros；需要显式匹配账户币种。更新预算必须列全 Campaign，预算 reference_count 与可见引用数也必须一致；共享影响写进预览。提交前重读原始状态与影响集合，并再次 validate_only。
 
@@ -37,6 +37,10 @@ Google Ads 没有在这里可用的远端 compare-and-swap：最后一次读取�
 Search 创建的非共享预算名称按 Google 的规则与 Campaign 名称一致；创建回读排除未在该计划中配置的 DEVICE 行，设备出价变更仍使用其专用回读。0.3.1 对旧 Search 计划提供这两项确定的回读兼容规则，在 reconciliation 证据中记录规则名；不改写原计划、hash 或 Google 资源。预算金额、地域、语言、否定词、广告组、文案和网址仍需全部匹配，才能解除旧操作的账户锁。
 
 创建后维护使用字段级 update mask；省略 patch 字段保留原值。原地修改共享 RSA 前必须完整声明所有未移除广告关联，提交前重新检查。素材修改通过本系列重新关联实现，避免全局修改共享素材；删除资源与不可变关键词的替换都在预览中明确显示。详细的列表清空、移除和替换语义见 [创建后维护](MAINTENANCE.md)。
+
+PMax 创建使用唯一名称标记，并回读品牌、定位、预算、系列、素材组和关联集合。替换素材/信号只操作明确给定的维度；其他类型及自动来源素材保留。素材库上传使用 Google 回执中对应 operation 的资源 ID 验证，不能按名称猜测，因为 Google 可能去重并返回已有资源。丢失回执的独立素材上传保持 UNKNOWN，即使查到同名同尺寸对象也不能视为已完成；不自动重传。已有的人工放弃 Search 创建命令不适用于这些新操作。
+
+图片预览和提交均核对本机文件 SHA-256；预览后换文件会变为 STALE。私有计划保留实际上传内容，用于 hash 和重编译核对；MCP/CLI 输出以摘要和字节数替代图片 base64。状态目录可能包含图片和业务素材，应视为本机私有数据保管。详见 [PMax 与素材管理](PMAX.md)。
 
 UNKNOWN 下“暂时查不到”不能证明没有创建，系统保持锁定，禁止自动重发或自动清账。若多次核对仍无法确定，使用 Google Ads 更改历史/支持渠道核对，再由维护者设计具体恢复；此版本故意没有通用 force-unlock 或重发按钮。重新登录后可以只读核对旧计划；新写入必须重新预览。
 

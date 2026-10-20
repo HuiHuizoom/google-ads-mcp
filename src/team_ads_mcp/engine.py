@@ -98,7 +98,7 @@ class Engine:
                 receipt_received = True
                 # Persist receipt before doing readback. Failure here still leaves IN_FLIGHT for reconciliation.
                 self.ledger.finish(plan_id, "IN_FLIGHT", {"receipt": response}, release=False)
-                result = verify(self.provider, account, fresh["checks"])
+                result = verify(self.provider, account, fresh["checks"], receipt=response)
                 self.ledger.finish(
                     plan_id,
                     "VERIFIED" if result["complete"] else "READBACK_MISMATCH",
@@ -179,7 +179,9 @@ class Engine:
                 )
             account = Account.model_validate(plan["body"]["request"]["account"])
             checks, _ = reconciliation_checks(plan)
-            evidence = verify(self.provider, account, checks)
+            evidence = verify(
+                self.provider, account, checks, receipt=(plan["result"] or {}).get("receipt")
+            )
             if not evidence["evidence"] or any(e["observed"] for e in evidence["evidence"]):
                 raise AdsError(
                     "RECOVERY_OBJECTS_FOUND", "已发现远端对象，必须核对或定向清理，不能放弃解锁"
@@ -217,7 +219,9 @@ class Engine:
                 return plan
             account = Account.model_validate(plan["body"]["request"]["account"])
             checks, corrections = reconciliation_checks(plan)
-            evidence = verify(self.provider, account, checks)
+            evidence = verify(
+                self.provider, account, checks, receipt=(plan["result"] or {}).get("receipt")
+            )
             if corrections:
                 evidence["check_compatibility"] = corrections
             prior = plan["result"] or {}

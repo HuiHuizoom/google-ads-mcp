@@ -120,7 +120,9 @@ def main():
                     )
                 else:
                     result = engine.reconcile(args.operation_id)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        from .media import public_payload
+
+        print(json.dumps(public_payload(result), ensure_ascii=False, indent=2))
     except (ValidationError, ValueError):
         print(
             json.dumps(

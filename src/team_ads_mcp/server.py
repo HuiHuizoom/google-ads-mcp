@@ -19,7 +19,17 @@ from . import __version__
 from .config import API_VERSION, load_settings, state_path
 from .engine import Engine
 from .errors import AdsError, safe_error
-from .models import Account, CampaignRef, DateRange, GroupRef, PlanInput, PositiveId, StrictModel
+from .media import image_payload, public_payload
+from .models import (
+    Account,
+    AssetGroupRef,
+    CampaignRef,
+    DateRange,
+    GroupRef,
+    PlanInput,
+    PositiveId,
+    StrictModel,
+)
 from .provider import GoogleProvider, literal, project_row, utc_now
 
 
@@ -55,12 +65,29 @@ class OperationInput(StrictModel):
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
+class ImageInput(StrictModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
 class ResourcesInput(AccountInput):
     resource: Literal[
-        "campaigns", "ad_groups", "ads", "keywords", "campaign_criteria", "campaign_assets"
+        "campaigns",
+        "ad_groups",
+        "ads",
+        "keywords",
+        "campaign_criteria",
+        "campaign_assets",
+        "assets",
+        "asset_groups",
+        "asset_group_assets",
+        "asset_group_signals",
+        "audiences",
     ]
     campaign: CampaignRef | None = None
     ad_group: GroupRef | None = None
+    asset_group: AssetGroupRef | None = None
+    asset_type: Literal["TEXT", "IMAGE", "YOUTUBE_VIDEO"] | None = None
+    name_contains: str | None = Field(default=None, min_length=1, max_length=100)
     ad_resource: str | None = Field(default=None, pattern=r"^customers/[0-9]{10}/ads/[1-9][0-9]*$")
     include_removed: bool = False
     max_rows: int = Field(default=1000, ge=1, le=10000)
@@ -194,9 +221,16 @@ def create_server(engine: Engine):
             TARGET_FIELDS,
         )
         from .planner import GROUP_FIELDS
+        from .pmax import (
+            ASSET_GROUP_FIELDS,
+            ASSET_LIBRARY_FIELDS,
+            AUDIENCE_FIELDS,
+            GROUP_LINK_FIELDS,
+            SIGNAL_FIELDS,
+        )
 
         settings.policy(arg.account)
-        for name in [arg.campaign, arg.ad_group, arg.ad_resource]:
+        for name in [arg.campaign, arg.ad_group, arg.ad_resource, arg.asset_group]:
             if name and name.split("/")[1] != arg.account.customer_id:
                 raise AdsError("CROSS_ACCOUNT_RESOURCE", "资源属于其他账户")
         resource, fields = {
@@ -206,10 +240,44 @@ def create_server(engine: Engine):
             "keywords": ("ad_group_criterion", KEYWORD_FIELDS),
             "campaign_criteria": ("campaign_criterion", TARGET_FIELDS),
             "campaign_assets": ("campaign_asset", ASSET_FIELDS),
+            "assets": ("asset", ASSET_LIBRARY_FIELDS),
+            "asset_groups": ("asset_group", ASSET_GROUP_FIELDS),
+            "asset_group_assets": ("asset_group_asset", GROUP_LINK_FIELDS),
+            "asset_group_signals": ("asset_group_signal", SIGNAL_FIELDS),
+            "audiences": ("audience", AUDIENCE_FIELDS),
         }[arg.resource]
-        conditions = [] if arg.include_removed else [f"{resource}.status != 'REMOVED'"]
+        conditions = (
+            []
+            if arg.include_removed or resource in {"asset", "asset_group_signal"}
+            else [f"{resource}.status != 'REMOVED'"]
+        )
         if arg.campaign:
-            conditions.append(f"campaign.resource_name = {literal(arg.campaign)}")
+            if arg.resource in {"assets", "audiences", "asset_group_signals"}:
+                raise AdsError(
+                    "INVALID_RESOURCE_FILTER", "此列表不支持 campaign 过滤；信号请使用 asset_group"
+                )
+            if arg.resource in {"asset_groups", "asset_group_assets"}:
+                conditions.append(f"asset_group.campaign = {literal(arg.campaign)}")
+            else:
+                conditions.append(f"campaign.resource_name = {literal(arg.campaign)}")
+        if arg.asset_group:
+            if arg.resource not in {"asset_groups", "asset_group_assets", "asset_group_signals"}:
+                raise AdsError("INVALID_RESOURCE_FILTER", "asset_group 仅用于素材组、关联和信号")
+            field = (
+                "asset_group.resource_name"
+                if resource == "asset_group"
+                else resource + ".asset_group"
+            )
+            conditions.append(f"{field} = {literal(arg.asset_group)}")
+        if arg.asset_type:
+            if arg.resource != "assets":
+                raise AdsError("INVALID_RESOURCE_FILTER", "asset_type 仅用于素材库")
+            conditions.append(f"asset.type = {literal(arg.asset_type)}")
+        if arg.name_contains:
+            if arg.resource not in {"assets", "asset_groups", "audiences"}:
+                raise AdsError("INVALID_RESOURCE_FILTER", "名称搜索仅用于素材库、素材组和受众")
+            term = arg.name_contains.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
+            conditions.append(f"{resource}.name LIKE {literal('%' + term + '%')}")
         if arg.ad_group:
             if arg.resource not in {"ad_groups", "ads", "keywords"}:
                 raise AdsError("INVALID_RESOURCE_FILTER", "ad_group 仅用于广告组、广告、关键词列表")
@@ -230,6 +298,13 @@ def create_server(engine: Engine):
 
     # schema, description, callable, read_only, idempotent
     registry = {
+        "inspect_image_asset": (
+            ImageInput,
+            "读取指定本机图片，返回 sha256、尺寸、格式及可用 PMax 素材类型；不上传、不裁剪。用于 create_assets 的上传前准备。",
+            lambda a: image_payload(a.path)[0],
+            True,
+            True,
+        ),
         "connection_status": (
             Empty,
             "检查本机配置与下一步；不读取或显示凭据，也不声称已连接 Google。",
@@ -281,7 +356,7 @@ def create_server(engine: Engine):
         ),
         "list_resources": (
             ResourcesInput,
-            "读取可维护的 Search 系列、广告组、RSA、关键词、定位/时段/设备、Campaign 素材及完整资源 ID；默认排除 REMOVED。广告编辑前用 ad_resource 查询全部关联，填入 expected_ad_group_ads。超限报错。",
+            "读取系列、广告组、RSA、关键词、定位/时段/设备、系列素材，以及素材库 assets、PMax 素材组 asset_groups/关联 asset_group_assets/信号 asset_group_signals、受众 audiences。支持素材类型及名称查找；默认排除可标记为 REMOVED 的资源。超限报错，不伪装完整结果。",
             resources,
             True,
             True,
@@ -302,7 +377,7 @@ def create_server(engine: Engine):
         ),
         "preview_change": (
             PlanInput,
-            "创建及创建后维护：Search 系列/广告组/RSA、预算、状态、关键词/否定词、出价策略、地区/语言、时段/设备、Campaign 素材。kind 决定动作；patch 省略字段保留，列表替换和清空语义见 schema description。读取 before/影响范围，编译原子变更并执行 Google validate_only；返回可供 submit_change 提交的计划，尚未写入广告。request_key 去重。",
+            "创建及创建后维护：Search、标准 PMax、素材组/受众信号/搜索主题、素材上传与复用、品牌素材，以及预算、出价、状态、定位等。kind 决定动作；patch 省略保留，列表替换/清空见 schema。读取 before/影响范围并执行 Google validate_only；返回供 submit_change 提交的计划，尚未写入广告。request_key 去重。",
             engine.preview,
             False,
             True,
@@ -367,7 +442,7 @@ def create_server(engine: Engine):
                         return handler(arg)
                 return handler(arg)
 
-            result = await asyncio.to_thread(invoke)
+            result = public_payload(await asyncio.to_thread(invoke))
             return types.CallToolResult(
                 content=[
                     types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))

@@ -1,4 +1,4 @@
-"""Strict, deliberately bounded Search campaign contracts (no raw mutations)."""
+"""Strict Search, Performance Max and asset contracts (no raw mutations)."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ CriterionRef = Annotated[
 StatusRef = Annotated[
     str,
     StringConstraints(
-        pattern=r"^customers/[0-9]{10}/(campaigns/[1-9][0-9]*|adGroups/[1-9][0-9]*|adGroupAds/[1-9][0-9]*~[1-9][0-9]*)$"
+        pattern=r"^customers/[0-9]{10}/(campaigns/[1-9][0-9]*|assetGroups/[1-9][0-9]*|adGroups/[1-9][0-9]*|adGroupAds/[1-9][0-9]*~[1-9][0-9]*)$"
     ),
 ]
 
@@ -331,7 +331,7 @@ class AddAdGroupNegatives(StrictModel):
 
 
 class CampaignPatch(Patch):
-    """省略保留。日期为账户时区 yyyy-MM-dd HH:mm:ss；已开始的系列不能改开始时间。search_partners 控制搜索合作伙伴，display_network 控制展示网络扩展。final_url_suffix='' 清除后缀。"""
+    """省略保留。日期为账户时区 yyyy-MM-dd HH:mm:ss；已开始的系列不能改开始时间。search_partners/display_network 仅用于 Search。final_url_suffix='' 清除后缀；final_url_expansion 仅用于 PMax，开关最终网址扩展并保留其他自动化设置。"""
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
     start_date_time: str | None = None
@@ -341,6 +341,7 @@ class CampaignPatch(Patch):
     positive_geo_target_type: Literal["PRESENCE", "PRESENCE_OR_INTEREST"] | None = None
     negative_geo_target_type: Literal["PRESENCE"] | None = None
     final_url_suffix: str | None = Field(default=None, max_length=2048)
+    final_url_expansion: bool | None = None
 
     @field_validator("start_date_time", "end_date_time")
     @classmethod
@@ -454,7 +455,7 @@ class SetDeviceBid(StrictModel):
 
 
 class RemoveResource(StrictModel):
-    """不可恢复地移除 Search 系列、广告组或广告关联。临时停用请用 set_status PAUSED；父资源移除会让下级停止投放，不自动删除系列预算。"""
+    """不可恢复地移除 Search/PMax 系列、Search 广告组/广告关联或 PMax 素材组。临时停用请用 set_status PAUSED；父资源移除会让下级停止投放，不自动删除预算或素材库对象。"""
 
     kind: Literal["remove_resource"]
     resource: StatusRef
@@ -522,6 +523,184 @@ class SetCampaignAssets(StrictModel):
         return self
 
 
+AssetRef = Annotated[str, StringConstraints(pattern=r"^customers/[0-9]{10}/assets/[1-9][0-9]*$")]
+AssetGroupRef = Annotated[
+    str, StringConstraints(pattern=r"^customers/[0-9]{10}/assetGroups/[1-9][0-9]*$")
+]
+AudienceRef = Annotated[
+    str, StringConstraints(pattern=r"^customers/[0-9]{10}/audiences/[1-9][0-9]*$")
+]
+PMaxField = Literal[
+    "HEADLINE",
+    "LONG_HEADLINE",
+    "DESCRIPTION",
+    "MARKETING_IMAGE",
+    "SQUARE_MARKETING_IMAGE",
+    "PORTRAIT_MARKETING_IMAGE",
+    "YOUTUBE_VIDEO",
+    "BUSINESS_NAME",
+    "LOGO",
+    "LANDSCAPE_LOGO",
+]
+
+
+class TextAssetInput(StrictModel):
+    type: Literal["TEXT"]
+    text: str = Field(min_length=1, max_length=90)
+
+    @field_validator("text")
+    @classmethod
+    def valid(cls, value):
+        return validate_text(value, 90)
+
+
+class ImageAssetInput(StrictModel):
+    """上传本机明确指定的 PNG/JPEG/GIF；先 inspect_image_asset 获取 sha256。预览及提交均核对同一文件内容，不裁剪。"""
+
+    type: Literal["IMAGE"]
+    path: str = Field(min_length=1, max_length=4096)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    name: str = Field(min_length=1, max_length=80)
+
+
+class VideoAssetInput(StrictModel):
+    """注册已有 YouTube 视频素材；不上传本地视频到 YouTube。"""
+
+    type: Literal["YOUTUBE_VIDEO"]
+    youtube_video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    name: str = Field(min_length=1, max_length=80)
+
+
+UploadAsset = Annotated[
+    TextAssetInput | ImageAssetInput | VideoAssetInput, Field(discriminator="type")
+]
+
+
+class CreateAssets(StrictModel):
+    """创建或由 Google 去重返回素材库对象；不关联投放。不原地修改共享素材，替换内容应创建后重新关联。"""
+
+    kind: Literal["create_assets"]
+    assets: list[UploadAsset] = Field(min_length=1, max_length=20)
+
+
+class AssetLink(StrictModel):
+    asset: AssetRef
+    field_type: PMaxField
+
+
+class AssetGroupContent(StrictModel):
+    name: str = Field(min_length=1, max_length=80)
+    final_urls: list[str] = Field(min_length=1, max_length=10)
+    assets: list[AssetLink] = Field(min_length=1, max_length=100)
+
+    @field_validator("final_urls")
+    @classmethod
+    def urls(cls, values):
+        return validate_urls(values)
+
+
+class CreatePMax(StrictModel):
+    """创建标准非零售 PMax：独立日预算、PAUSED 系列及素材组、启用品牌指南。素材需先上传或查找；不启用投放，不设置 Merchant Center 商品源。"""
+
+    kind: Literal["create_pmax"]
+    name: str = Field(min_length=1, max_length=80)
+    currency: Currency
+    daily_amount: Money
+    bidding: Literal["MAXIMIZE_CONVERSIONS", "MAXIMIZE_CONVERSION_VALUE"]
+    target_cpa: Money | None = None
+    target_roas: float | None = Field(default=None, gt=0, le=1000, allow_inf_nan=False)
+    geo_target_ids: list[PositiveId] = Field(min_length=1, max_length=20)
+    language_ids: list[PositiveId] = Field(min_length=1, max_length=10)
+    eu_political_advertising: Literal["DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"]
+    brand_assets: list[AssetLink] = Field(min_length=2, max_length=6)
+    asset_groups: list[AssetGroupContent] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def valid(self):
+        micros(self.daily_amount)
+        if self.target_cpa is not None:
+            micros(self.target_cpa)
+            if self.bidding != "MAXIMIZE_CONVERSIONS":
+                raise ValueError("target_cpa 只适用于 MAXIMIZE_CONVERSIONS")
+        if self.target_roas is not None and self.bidding != "MAXIMIZE_CONVERSION_VALUE":
+            raise ValueError("target_roas 只适用于 MAXIMIZE_CONVERSION_VALUE")
+        for values in [self.geo_target_ids, self.language_ids, [g.name for g in self.asset_groups]]:
+            if len(set(values)) != len(values):
+                raise ValueError("地区、语言、素材组名称不可重复")
+        return self
+
+
+class CreateAssetGroup(StrictModel):
+    """向已有标准 PMax 添加 PAUSED 素材组，同时原子关联满足最低要求的素材。"""
+
+    kind: Literal["create_asset_group"]
+    campaign: CampaignRef
+    group: AssetGroupContent
+
+
+class AssetGroupPatch(Patch):
+    """省略保留；创建后修改名称、最终网址、显示路径。路径可用空字符串清空。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    final_urls: list[str] | None = Field(default=None, min_length=1, max_length=10)
+    path1: str | None = Field(default=None, max_length=15)
+    path2: str | None = Field(default=None, max_length=15)
+
+    @model_validator(mode="after")
+    def valid(self):
+        if self.final_urls is not None:
+            validate_urls(self.final_urls)
+        for value in [self.path1, self.path2]:
+            if value:
+                validate_text(value, 15)
+                if "/" in value or any(c.isspace() for c in value):
+                    raise ValueError("显示路径不能含斜杠或空白")
+        return self
+
+
+class UpdateAssetGroup(StrictModel):
+    kind: Literal["update_asset_group"]
+    asset_group: AssetGroupRef
+    patch: AssetGroupPatch
+
+
+class SetAssetGroupAssets(StrictModel):
+    """各传入 field_type 的完整目标素材集合；未传入类型保留。[] 删除该类型人工关联，但不可低于 Google 最低素材要求。自动来源关联保留，共享素材内容不变。"""
+
+    kind: Literal["set_asset_group_assets"]
+    asset_group: AssetGroupRef
+    assets_by_field: dict[PMaxField, list[AssetRef]] = Field(min_length=1, max_length=11)
+
+
+class SetAssetGroupSignals(StrictModel):
+    """受众和搜索主题是优化提示，不是硬性定向。仅替换提供的维度，省略保留，[] 清空；信号不可原地更新，因此差异通过添加/移除实现。audiences 使用已有 Audience。"""
+
+    kind: Literal["set_asset_group_signals"]
+    asset_group: AssetGroupRef
+    audiences: list[AudienceRef] | None = Field(default=None, max_length=10)
+    search_themes: list[str] | None = Field(default=None, max_length=50)
+
+    @model_validator(mode="after")
+    def valid(self):
+        if not ({"audiences", "search_themes"} & self.model_fields_set):
+            raise ValueError("至少提供一种信号；[] 清空，省略保留")
+        for key in self.model_fields_set - {"kind", "asset_group"}:
+            values = getattr(self, key)
+            if values is None or len({v.casefold() for v in values}) != len(values):
+                raise ValueError("不接受 null 或重复信号")
+        for theme in self.search_themes or []:
+            validate_text(theme, 80)
+        return self
+
+
+class SetPMaxBrandAssets(StrictModel):
+    """替换启用品牌指南 PMax 的完整人工品牌关联（BUSINESS_NAME/LOGO/LANDSCAPE_LOGO），保留其他类型及自动素材；必须保持一个商家名和合规 Logo。"""
+
+    kind: Literal["set_pmax_brand_assets"]
+    campaign: CampaignRef
+    assets: list[AssetLink] = Field(min_length=2, max_length=6)
+
+
 SingleChange = Annotated[
     AddKeywords
     | AddNegatives
@@ -542,7 +721,14 @@ SingleChange = Annotated[
     | SetSchedule
     | SetDeviceBid
     | RemoveResource
-    | SetCampaignAssets,
+    | SetCampaignAssets
+    | CreateAssets
+    | CreatePMax
+    | CreateAssetGroup
+    | UpdateAssetGroup
+    | SetAssetGroupAssets
+    | SetAssetGroupSignals
+    | SetPMaxBrandAssets,
     Field(discriminator="kind"),
 ]
 
