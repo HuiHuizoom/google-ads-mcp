@@ -360,7 +360,14 @@ def create_server(engine: Engine):
                 raise AdsError("UNKNOWN_TOOL", "未知工具")
             model, _, handler, _, _ = registry[params.name]
             arg = model.model_validate(params.arguments or {})
-            result = await asyncio.to_thread(handler, arg)
+
+            def invoke():
+                if isinstance(provider, GoogleProvider):
+                    with provider.request_scope():
+                        return handler(arg)
+                return handler(arg)
+
+            result = await asyncio.to_thread(invoke)
             return types.CallToolResult(
                 content=[
                     types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))

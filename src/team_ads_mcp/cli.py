@@ -101,12 +101,13 @@ def main():
             )
         else:
             engine = make_engine()
-            if args.command == "show-operation":
-                result = engine.ledger.get(args.operation_id)
-            elif args.command == "submit":
-                result = engine.submit(args.operation_id)
-            else:
-                result = engine.reconcile(args.operation_id)
+            with engine.provider.request_scope():
+                if args.command == "show-operation":
+                    result = engine.ledger.get(args.operation_id)
+                elif args.command == "submit":
+                    result = engine.submit(args.operation_id)
+                else:
+                    result = engine.reconcile(args.operation_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValidationError, ValueError):
         print(

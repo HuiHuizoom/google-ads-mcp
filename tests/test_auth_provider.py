@@ -128,12 +128,71 @@ def test_field_metadata_uses_valid_separate_queries_and_literal_underscores(tmp_
     ]
     client = Mock()
     client.get_service.return_value = service
-    monkeypatch.setattr(provider, "client", lambda: client)
+    monkeypatch.setattr(provider, "client", lambda account=None: client)
     assert [r["name"] for r in provider.fields("ad_group")] == ["ad_group", "ad_group.name"]
     queries = [c.kwargs["query"] for c in service.search_google_ads_fields.call_args_list]
     assert queries[0].endswith("WHERE name = 'ad_group'")
     assert queries[1].endswith("WHERE name LIKE 'ad[_]group.%'")
     assert all(" OR " not in query and " FROM " not in query for query in queries)
+
+
+def test_request_scope_reuses_warmed_service_and_reloads_credentials(tmp_path, monkeypatch):
+    from team_ads_mcp import provider as module
+
+    sdk = FakeProvider().sdk
+    clients = [Mock(), Mock()]
+    for client in clients:
+        client.get_type.side_effect = sdk.get_type
+        client.get_service.return_value.search.return_value = []
+        client.get_service.return_value.mutate.return_value = sdk.get_type(
+            "MutateGoogleAdsResponse"
+        )
+    factory = Mock(side_effect=clients)
+    credentials = Mock(side_effect=[Mock(), Mock()])
+    monkeypatch.setattr(module, "GoogleAdsClient", factory)
+    monkeypatch.setattr(module, "credentials", credentials)
+    provider = GoogleProvider(tmp_path, settings())
+    with provider.request_scope():
+        provider.search(ACCOUNT, "SELECT customer.id FROM customer")
+        with provider.request_scope():
+            provider.mutate(ACCOUNT, [], validate_only=True)
+        provider.mutate(ACCOUNT, [], validate_only=False)
+        clients[0].get_service.return_value.transport.close.assert_not_called()
+    assert factory.call_count == credentials.call_count == 1
+    clients[0].get_service.assert_called_once_with("GoogleAdsService")
+    assert clients[0].get_service.return_value.mutate.call_count == 2
+    assert all(
+        c.kwargs["retry"] is None for c in clients[0].get_service.return_value.mutate.call_args_list
+    )
+    clients[0].get_service.return_value.transport.close.assert_called_once()
+    with provider.request_scope():
+        provider.search(ACCOUNT, "SELECT customer.id FROM customer")
+    assert factory.call_count == credentials.call_count == 2
+    clients[1].get_service.return_value.transport.close.assert_called_once()
+
+
+def test_request_scope_isolates_login_routes_and_closes_on_failure(tmp_path, monkeypatch):
+    from team_ads_mcp import provider as module
+    from team_ads_mcp.models import Account
+
+    factory = Mock(side_effect=lambda **kwargs: Mock())
+    monkeypatch.setattr(module, "GoogleAdsClient", factory)
+    monkeypatch.setattr(module, "credentials", Mock())
+    provider = GoogleProvider(tmp_path, settings())
+    with pytest.raises(ValueError, match="original"), provider.request_scope():
+        manager = provider.service("GoogleAdsService", ACCOUNT)
+        direct = provider.service("GoogleAdsService", Account(customer_id=ACCOUNT.customer_id))
+        assert manager is not direct
+        assert provider.service("GoogleAdsService", ACCOUNT) is manager
+        direct.transport.close.side_effect = RuntimeError("close failed")
+        raise ValueError("original")
+    assert [c.kwargs["login_customer_id"] for c in factory.call_args_list] == [
+        ACCOUNT.login_customer_id,
+        None,
+    ]
+    manager.transport.close.assert_called_once()
+    direct.transport.close.assert_called_once()
+    assert not hasattr(provider._request, "cache")
 
 
 def test_revocation_unknown_keeps_credentials(tmp_path, monkeypatch):

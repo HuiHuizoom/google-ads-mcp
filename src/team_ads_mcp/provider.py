@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import local
 
 from google.ads.googleads.client import GoogleAdsClient
 
@@ -33,21 +35,54 @@ class GoogleProvider:
 
     def __init__(self, path: Path, settings: Settings):
         self.path, self.settings = path, settings
+        self._request = local()
+
+    @contextmanager
+    def request_scope(self):
+        """Reuse warmed channels within one call; reload credentials on the next call."""
+        if getattr(self._request, "cache", None) is not None:
+            yield
+            return
+        cache = {"clients": {}, "services": {}}
+        self._request.cache = cache
+        try:
+            yield
+        finally:
+            del self._request.cache
+            for service in cache["services"].values():
+                # Cleanup must never replace a received write result with a close error.
+                with suppress(Exception):
+                    service.transport.close()
 
     def client(self, account: Account | None = None):
-        return GoogleAdsClient(
+        login_id = account.login_customer_id if account else None
+        cache = getattr(self._request, "cache", None)
+        if cache is not None and login_id in cache["clients"]:
+            return cache["clients"][login_id]
+        client = GoogleAdsClient(
             credentials=credentials(self.path, self.settings),
             version=API_VERSION,
-            login_customer_id=account.login_customer_id if account else None,
+            login_customer_id=login_id,
             use_proto_plus=True,
         )
+        if cache is not None:
+            cache["clients"][login_id] = client
+        return client
+
+    def service(self, name: str, account: Account | None = None):
+        key = (name, account.login_customer_id if account else None)
+        cache = getattr(self._request, "cache", None)
+        if cache is not None and key in cache["services"]:
+            return cache["services"][key]
+        service = self.client(account).get_service(name)
+        if cache is not None:
+            cache["services"][key] = service
+        return service
 
     def discover(self):
         try:
-            response = (
-                self.client()
-                .get_service("CustomerService")
-                .list_accessible_customers(retry=None, timeout=self.settings.timeout_seconds)
+            response = self.service("CustomerService").list_accessible_customers(
+                retry=None, timeout=self.settings.timeout_seconds
             )
             return {
                 "resource_names": list(response.resource_names),
@@ -59,15 +94,11 @@ class GoogleProvider:
 
     def search(self, account: Account, query: str, limit: int = 1000):
         try:
-            rows = (
-                self.client(account)
-                .get_service("GoogleAdsService")
-                .search(
-                    customer_id=account.customer_id,
-                    query=query,
-                    retry=None,
-                    timeout=self.settings.timeout_seconds,
-                )
+            rows = self.service("GoogleAdsService", account).search(
+                customer_id=account.customer_id,
+                query=query,
+                retry=None,
+                timeout=self.settings.timeout_seconds,
             )
             result = []
             for row in rows:
@@ -95,7 +126,7 @@ class GoogleProvider:
         if not name or not all(c.isalnum() or c in "_." for c in name):
             raise AdsError("INVALID_FIELD", "请输入资源或字段名")
         try:
-            service = self.client().get_service("GoogleAdsFieldService")
+            service = self.service("GoogleAdsFieldService")
             # GAQL supports AND, but not OR. Escape '_' in the prefix LIKE pattern.
             prefix = name.replace("_", "[_]") + ".%"
             rows = []
@@ -119,8 +150,7 @@ class GoogleProvider:
         self, account: Account, seeds: list[str], geo_ids: list[str], language_id: str
     ):
         try:
-            client = self.client(account)
-            response = client.get_service("KeywordPlanIdeaService").generate_keyword_ideas(
+            response = self.service("KeywordPlanIdeaService", account).generate_keyword_ideas(
                 request={
                     "customer_id": account.customer_id,
                     "language": f"languageConstants/{language_id}",
@@ -159,7 +189,7 @@ class GoogleProvider:
                 validate_only=validate_only,
                 response_content_type="RESOURCE_NAME_ONLY",
             )
-            response = client.get_service("GoogleAdsService").mutate(
+            response = self.service("GoogleAdsService", account).mutate(
                 request=request, retry=None, timeout=self.settings.timeout_seconds
             )
             result = to_dict(response)
