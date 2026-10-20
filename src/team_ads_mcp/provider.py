@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 from threading import local
+from time import sleep
 
 from google.ads.googleads.client import GoogleAdsClient
 
@@ -28,6 +30,29 @@ def to_dict(message):
         preserving_proto_field_name=True,
         always_print_fields_with_no_presence=True,
     )
+
+
+def read_only_retry(method):
+    """Retry a complete read, never mutation RPCs (including validate_only)."""
+
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        for attempt in range(3):
+            try:
+                return method(*args, **kwargs)
+            except AdsError as error:
+                if error.code != "TRANSPORT_UNKNOWN":
+                    raise
+                if attempt == 2:
+                    raise AdsError(
+                        "READ_UNAVAILABLE",
+                        "只读请求三次连接尝试失败；本次读取不会修改广告，可稍后重新读取",
+                        retryable=True,
+                        request_id=error.request_id,
+                    ) from None
+                sleep(0.5 * (attempt + 1))
+
+    return wrapped
 
 
 class GoogleProvider:
@@ -79,6 +104,7 @@ class GoogleProvider:
             cache["services"][key] = service
         return service
 
+    @read_only_retry
     def discover(self):
         try:
             response = self.service("CustomerService").list_accessible_customers(
@@ -92,6 +118,7 @@ class GoogleProvider:
         except Exception as exc:
             raise safe_error(exc) from None
 
+    @read_only_retry
     def search(self, account: Account, query: str, limit: int = 1000):
         try:
             rows = self.service("GoogleAdsService", account).search(
@@ -122,6 +149,7 @@ class GoogleProvider:
             raise AdsError("ACCOUNT_UNAVAILABLE", "未返回账户信息")
         return rows[0]["customer"]
 
+    @read_only_retry
     def fields(self, name: str):
         if not name or not all(c.isalnum() or c in "_." for c in name):
             raise AdsError("INVALID_FIELD", "请输入资源或字段名")
@@ -146,6 +174,7 @@ class GoogleProvider:
         except Exception as exc:
             raise safe_error(exc) from None
 
+    @read_only_retry
     def keyword_ideas(
         self, account: Account, seeds: list[str], geo_ids: list[str], language_id: str
     ):

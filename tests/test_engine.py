@@ -290,6 +290,25 @@ def test_exact_micros_and_currency(engine):
             PlanInput.model_validate(data)
 
 
+def test_budget_over_limit_fails_before_validation_or_plan_creation(engine):
+    request = PlanInput(
+        account=ACCOUNT,
+        request_key="budget-over-limit",
+        change={
+            "kind": "set_budget",
+            "budget": BUDGET,
+            "currency": "USD",
+            "daily_amount": "101",
+            "expected_campaigns": [CAMPAIGN],
+        },
+    )
+    with pytest.raises(AdsError) as exc:
+        engine.preview(request)
+    assert exc.value.code == "BUDGET_LIMIT"
+    assert engine.ledger.by_key(request.request_key) is None
+    assert not engine.provider.calls
+
+
 def test_broad_resource_or_status_injection_rejected():
     data = search_input()
     data["change"]["status"] = "ENABLED"

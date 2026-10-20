@@ -51,6 +51,14 @@ def parser():
     ]:
         child = commands.add_parser(command, help=help_text)
         child.add_argument("operation_id")
+    recovery = commands.add_parser(
+        "abandon-unknown-creation",
+        help="仅人工接受无回执暂停创建的未知结果，保留审计并解除阻塞；不是取消 Google 请求",
+    )
+    recovery.add_argument("operation_id")
+    recovery.add_argument("--expected-hash", required=True)
+    recovery.add_argument("--reason", required=True)
+    recovery.add_argument("--accept-unknown-outcome", action="store_true", required=True)
     return root
 
 
@@ -106,6 +114,10 @@ def main():
                     result = engine.ledger.get(args.operation_id)
                 elif args.command == "submit":
                     result = engine.submit(args.operation_id)
+                elif args.command == "abandon-unknown-creation":
+                    result = engine.abandon_unknown_creation(
+                        args.operation_id, args.expected_hash, args.reason
+                    )
                 else:
                     result = engine.reconcile(args.operation_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))

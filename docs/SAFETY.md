@@ -18,6 +18,7 @@ OS Keychain、代码和本机私有状态目录属于同一个可信 OS 用户�
 - UNKNOWN：网络、内部错误、部分失败异常或回读异常使结果不明，保留账户锁。
 - READBACK_MISMATCH：有回执，但结构/内容未完全匹配，保留账户锁。
 - RECONCILED：只读核对发现预期完整状态，可以解除本地锁；不宣称绝对因果归属或 exactly-once。
+- ABANDONED_UNKNOWN：维护者明确接受一笔无回执暂停创建的未知结果，保留审计、永久禁止重发并只释放该笔锁；不证明未执行、成功或已取消。
 
 旧账本的 APPROVED 状态和审批字段仅为兼容历史记录保留；尚未提交的旧计划仍须通过同样的完整性、权限、时效及远端校验。新计划不再产生 APPROVED 事件。升级不删除历史事件，也不解除 UNKNOWN / READBACK_MISMATCH 等未解决操作的账户锁。
 
@@ -39,9 +40,26 @@ Search 创建的非共享预算名称按 Google 的规则与 Campaign 名称一�
 
 UNKNOWN 下“暂时查不到”不能证明没有创建，系统保持锁定，禁止自动重发或自动清账。若多次核对仍无法确定，使用 Google Ads 更改历史/支持渠道核对，再由维护者设计具体恢复；此版本故意没有通用 force-unlock 或重发按钮。重新登录后可以只读核对旧计划；新写入必须重新预览。
 
+### 人工放弃一笔未知的暂停创建
+
+0.3.4 提供受限 CLI `team-ads abandon-unknown-creation`，不向 MCP 增加解锁工具。只有维护者接受可能出现迟到暂停副本的风险、决定不再重发该笔请求时使用：
+
+```sh
+uv run team-ads abandon-unknown-creation OPERATION_ID \
+  --expected-hash EXACT_PLAN_HASH \
+  --reason "核对证据及明确接受未知结果风险的原因" \
+  --accept-unknown-outcome
+```
+
+必须同时满足：原计划完整性及账户允许列表通过、hash 与人工核对的具体计划一致、状态为 UNKNOWN、错误为 TRANSPORT_UNKNOWN、没有任何 receipt 字段、仅包含完整且明确 PAUSED 的 Search 创建结构、没有正在运行的提交、首次提交已超过 30 分钟、再次读取的全部创建检查均未找到对象。任一条件不满足时保留原状态和锁。30 分钟是本工具的恢复门槛，不是 Google 的执行时限，也不是未执行证明。
+
+操作保留原结果，追加 `manual_resolution` 及 ABANDONED_UNKNOWN 事件，并在同一账本事务中只释放该计划的锁。旧 request_key / operation_id 永不重新发送。之后需另行读取旧计划名称标记，核查是否迟到出现暂停副本；已放弃状态本身不会自动把结果变为成功。
+
 ## 数据与安全输出
 
 只读搜索设置行数限制，超过上限报错而不是提供假完整结果。预定义报表要求明确起止日期并按账户时区校验；原始 GAQL 的日期范围来自 query 本身。source、fetched_at、timezone、currency 和未知 data_through 随结果返回。关键词历史指标不等于当前流量或未来效果；转化设置不是实际回传证明。
+
+发现账户、GAQL、字段查询和关键词研究只对瞬时传输失败最多尝试三次；完整读取成功后才返回，失败的部分分页不复用。权限/授权/输入错误不因此重试，最终连接失败返回 `READ_UNAVAILABLE`。写入和提交前 `validate_only` 仍关闭自动重试。
 
 凭据不进入 MCP 输入输出、日志、SQLite 或 Git。异常只返回稳定错误码、Google request_id 和枚举错误码，避免转发可能含 headers/token 的原始异常。Google SDK 的原始请求日志在入口禁用。数据库含账户结构/文案等业务数据，属于本机私有数据，应跟随主机备份与访问策略管理。
 

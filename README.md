@@ -62,7 +62,7 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 ```
 
-测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入。没有偷偷使用任何已有 Google 凭据，也没有将模拟数据作为 Google 测试账户结果。
+自动化测试包含真实 MCP stdio 子进程 initialize / tools/list / tools/call、真实 v25 SDK 消息序列化、离线状态模拟、OAuth PKCE/state 与故障注入，不使用已有 Google 凭据。另经用户授权在真实账户完成 20 种写入动作的主路径验收：49 个计划中 48 VERIFIED、1 RECONCILED，测试资源已清理。关键词研究仍受 Google 访问等级限制，特殊场景和连接稳定性的边界见 [验收记录](docs/VERIFICATION.md)；模拟结果不作为真实账户证据。
 
 ## 项目边界
 

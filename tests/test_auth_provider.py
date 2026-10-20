@@ -118,6 +118,72 @@ def test_arbitrary_error_no_secret_leak():
     assert "SECRET" not in json.dumps(result)
 
 
+def test_read_retries_transient_errors_but_mutations_do_not(tmp_path, monkeypatch):
+    from google.api_core.exceptions import ServiceUnavailable
+
+    from team_ads_mcp import provider as module
+
+    monkeypatch.setattr(module, "sleep", lambda _: None)
+    provider = GoogleProvider(tmp_path, settings())
+    sdk = FakeProvider().sdk
+    service = Mock()
+    service.search.side_effect = [ServiceUnavailable("private"), []]
+    client = Mock()
+    client.get_service.return_value = service
+    client.get_type.side_effect = sdk.get_type
+    monkeypatch.setattr(provider, "client", lambda account=None: client)
+    assert provider.search(ACCOUNT, "SELECT customer.id FROM customer") == []
+    assert service.search.call_count == 2
+    service.search.side_effect = ServiceUnavailable("private")
+    with pytest.raises(AdsError) as exc:
+        provider.search(ACCOUNT, "SELECT customer.id FROM customer")
+    assert exc.value.code == "READ_UNAVAILABLE"
+    assert exc.value.retryable
+    assert "private" not in str(exc.value)
+    assert service.search.call_count == 5
+    service.mutate.side_effect = ServiceUnavailable("private")
+    for validate_only in [True, False]:
+        with pytest.raises(AdsError) as exc:
+            provider.mutate(ACCOUNT, [], validate_only=validate_only)
+        assert exc.value.code == "TRANSPORT_UNKNOWN"
+    assert service.mutate.call_count == 2
+
+
+def test_read_does_not_retry_permission_errors(tmp_path, monkeypatch):
+    from google.api_core.exceptions import PermissionDenied
+
+    provider = GoogleProvider(tmp_path, settings())
+    service = Mock()
+    service.search.side_effect = PermissionDenied("private")
+    monkeypatch.setattr(provider, "service", lambda *args: service)
+    with pytest.raises(AdsError) as exc:
+        provider.search(ACCOUNT, "SELECT customer.id FROM customer")
+    assert exc.value.code == "GOOGLE_ACCESS_DENIED"
+    service.search.assert_called_once()
+
+
+def test_read_retry_discards_partial_pages(tmp_path, monkeypatch):
+    from google.api_core.exceptions import ServiceUnavailable
+
+    from team_ads_mcp import provider as module
+
+    monkeypatch.setattr(module, "sleep", lambda _: None)
+    provider = GoogleProvider(tmp_path, settings())
+    sdk = FakeProvider().sdk
+    row = type(sdk.get_type("GoogleAdsRow"))(customer={"id": 1234567890})
+
+    def partial_page():
+        yield row
+        raise ServiceUnavailable("private")
+
+    service = Mock()
+    service.search.side_effect = [partial_page(), [row]]
+    monkeypatch.setattr(provider, "service", lambda *args: service)
+    result = provider.search(ACCOUNT, "SELECT customer.id FROM customer")
+    assert len(result) == 1
+    assert service.search.call_count == 2
+
+
 def test_field_metadata_uses_valid_separate_queries_and_literal_underscores(tmp_path, monkeypatch):
     provider = GoogleProvider(tmp_path, settings())
     sdk = FakeProvider().sdk

@@ -79,3 +79,80 @@ def test_shared_budget_missing_reference_fails_closed(tmp_path):
     with pytest.raises(AdsError) as exc:
         engine.preview(PlanInput.model_validate(data))
     assert exc.value.code == "BUDGET_IMPACT_INCOMPLETE"
+
+
+def unknown_creation(tmp_path, *, applied=False, age=True):
+    provider = FakeProvider()
+    engine = Engine(tmp_path, settings(), provider)
+    plan = engine.preview(PlanInput.model_validate(search_input()))
+    provider.failure = TimeoutError()
+    provider.apply_before_failure = applied
+    assert engine.submit(plan["id"])["status"] == "UNKNOWN"
+    provider.failure = None
+    if age:
+        with engine.ledger.db() as db:
+            db.execute(
+                "UPDATE events SET at='2020-01-01T00:00:00+00:00' WHERE plan_id=? AND event='IN_FLIGHT'",
+                (plan["id"],),
+            )
+    return provider, engine, plan
+
+
+def test_explicit_unknown_creation_abandonment_preserves_unknown_and_never_resends(tmp_path):
+    provider, engine, plan = unknown_creation(tmp_path)
+    result = engine.abandon_unknown_creation(plan["id"], plan["plan_hash"], "operator accepts risk")
+    assert result["status"] == "ABANDONED_UNKNOWN"
+    assert result["result"]["error"]["code"] == "TRANSPORT_UNKNOWN"
+    assert result["result"]["manual_resolution"]["outcome"] == "unknown_not_cancelled"
+    assert engine.submit(plan["id"])["status"] == "ABANDONED_UNKNOWN"
+    assert (
+        engine.abandon_unknown_creation(plan["id"], plan["plan_hash"], "repeat")["status"]
+        == "ABANDONED_UNKNOWN"
+    )
+    assert len([x for x in provider.calls if not x[0]]) == 1
+    with engine.ledger.db() as db:
+        assert db.execute("SELECT count(*) FROM account_locks").fetchone()[0] == 0
+    events = engine.ledger.events(plan["id"])
+    assert [e["event"] for e in events].count("ABANDONED_UNKNOWN") == 1
+    next_plan = engine.preview(status_input("after-abandonment"))
+    assert engine.submit(next_plan["id"])["status"] == "VERIFIED"
+
+
+@pytest.mark.parametrize(
+    "mode,code",
+    [
+        ("hash", "PLAN_BINDING_CHANGED"),
+        ("early", "RECOVERY_TOO_EARLY"),
+        ("applied", "RECOVERY_OBJECTS_FOUND"),
+        ("receipt", "RECOVERY_NOT_ALLOWED"),
+        ("reason", "RECOVERY_REASON_REQUIRED"),
+        ("read_failure", "TRANSPORT_UNKNOWN"),
+    ],
+)
+def test_unknown_abandonment_fails_closed(tmp_path, monkeypatch, mode, code):
+    provider, engine, plan = unknown_creation(
+        tmp_path, applied=mode == "applied", age=mode != "early"
+    )
+    if mode == "receipt":
+        engine.ledger.finish(
+            plan["id"],
+            "UNKNOWN",
+            {"receipt": {}, "error": {"code": "TRANSPORT_UNKNOWN"}},
+            release=False,
+        )
+    if mode == "read_failure":
+
+        def unavailable(*args, **kwargs):
+            raise AdsError("TRANSPORT_UNKNOWN", "unavailable")
+
+        monkeypatch.setattr(provider, "search", unavailable)
+    with pytest.raises(AdsError) as exc:
+        engine.abandon_unknown_creation(
+            plan["id"],
+            "wrong" if mode == "hash" else plan["plan_hash"],
+            "" if mode == "reason" else "operator accepts risk",
+        )
+    assert exc.value.code == code
+    assert engine.ledger.get(plan["id"])["status"] == "UNKNOWN"
+    with engine.ledger.db() as db:
+        assert db.execute("SELECT count(*) FROM account_locks").fetchone()[0] == 1
